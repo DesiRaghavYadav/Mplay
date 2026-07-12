@@ -1,0 +1,6 @@
+{
+  "name": "ReelsViral",
+  "description": "Premium OTT Streaming Media Platform with local database storage, custom circular channel lists, freshly added movies, top reels, download manager, and customer support tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -11,7 +11,7 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.reelsviral"
+    applicationId = "com.mastreels"
     minSdk = 24
     targetSdk = 36
     versionCode = 12
@@ -101,6 +101,7 @@ dependencies {
   implementation(libs.logging.interceptor)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
+  implementation(libs.play.services.ads)
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)
   implementation(libs.installreferrer)

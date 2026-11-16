@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ad-services-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Explicitly opt out of Privacy Sandbox AdServices attribution/measurement in environments where the service is unavailable -->
+    <attribution allowAdServices="false" />
+    <topics allowAdServices="false" />
+    <protected-audience allowAdServices="false" />
+</ad-services-config>

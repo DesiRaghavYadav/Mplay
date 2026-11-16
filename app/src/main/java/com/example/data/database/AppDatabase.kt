@@ -26,9 +26,11 @@ import com.example.data.model.*
         Story::class,
         StoryPart::class,
         ComicHistory::class,
-        StoryHistory::class
+        StoryHistory::class,
+        BatchVideo::class,
+        BatchVideoItem::class
     ],
-    version = 10,
+    version = 12,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

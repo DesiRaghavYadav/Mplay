@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import android.app.Activity
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -11,7 +12,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -80,8 +83,14 @@ import android.speech.tts.UtteranceProgressListener
 
 val CategoriesList = listOf(
     "Freshly Added Now!",
+    "step brother",
+    "public",
     "Ullu Originals – Most Loved!",
     "PrimePlay Specials – Hot & Wild!",
+    "teen",
+    "step",
+    "old",
+    "Test Category Preservation",
     "Watch Hunter – Now Streaming!",
     "Best Of Voovi",
     "Rabbit Originals"
@@ -273,34 +282,6 @@ fun MPlaySkeletonLoader(modifier: Modifier = Modifier) {
                 }
             }
         }
-        
-        // Centered Elegant Verification/Sync Indicator Overlay
-        Box(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
-                .padding(horizontal = 24.dp, vertical = 16.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                CircularProgressIndicator(
-                    color = Color.Red,
-                    strokeWidth = 3.dp,
-                    modifier = Modifier.size(36.dp)
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "Verifying Account Status...",
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    letterSpacing = 0.5.sp
-                )
-            }
-        }
     }
 }
 
@@ -323,14 +304,16 @@ fun MainAppScreen(
     val selectedMedia by viewModel.selectedMedia.collectAsStateWithLifecycle()
     val wishlist by viewModel.wishlist.collectAsStateWithLifecycle()
 
-    val context = LocalContext.current
+    val currentContext = LocalContext.current
+    val context = currentContext
+    val currentActivity = currentContext as? android.app.Activity
     val coroutineScope = rememberCoroutineScope()
 
     val isPremium = profileState?.isPremium == true
 
     // Resolve the actual tab immediately to prevent single-frame flickering of premium screens at startup
     val actualTab = remember(currentTab, isPremium) {
-        if (!isPremium && (currentTab == AppTab.HOME || currentTab == AppTab.EXPLORE)) {
+        if (!isPremium && (currentTab == AppTab.HOME || currentTab == AppTab.EXPLORE || currentTab == AppTab.BATCH_VIDEO || currentTab == AppTab.COMICS || currentTab == AppTab.STORIES)) {
             AppTab.REELS
         } else if (isPremium && (currentTab == AppTab.PROFILE || currentTab == AppTab.SUPPORT)) {
             AppTab.HOME
@@ -339,9 +322,9 @@ fun MainAppScreen(
         }
     }
 
-    // Reroute free users away from restricted Home/Explore tabs instantly, and premium users away from Profile/Support
+    // Reroute free users away from restricted Home/Explore/Batches tabs instantly, and premium users away from Profile/Support
     LaunchedEffect(isPremium, currentTab) {
-        if (!isPremium && (currentTab == AppTab.HOME || currentTab == AppTab.EXPLORE)) {
+        if (!isPremium && (currentTab == AppTab.HOME || currentTab == AppTab.EXPLORE || currentTab == AppTab.BATCH_VIDEO || currentTab == AppTab.COMICS || currentTab == AppTab.STORIES)) {
             viewModel.selectTab(AppTab.REELS)
         } else if (isPremium && (currentTab == AppTab.PROFILE || currentTab == AppTab.SUPPORT)) {
             viewModel.selectTab(AppTab.HOME)
@@ -367,8 +350,8 @@ fun MainAppScreen(
     }
 
     // Determine if back handler is enabled:
-    // We should intercept back press if either player is open, comic reader is open, media details are open, or there is previous tab history to go back to.
-    val backEnabled = isPlayingVideo != null || mainActiveReadingChapter != null || selectedMedia != null || tabHistory.size > 1
+    // We should intercept back press if player, comic reader, story reader, story details, media details are open, or tab history exists.
+    val backEnabled = isPlayingVideo != null || mainActiveReadingChapter != null || viewModel.activeReadingPart != null || viewModel.selectedStoryDetail != null || selectedMedia != null || tabHistory.size > 1
 
     BackHandler(enabled = backEnabled) {
         if (isPlayingVideo != null) {
@@ -376,6 +359,10 @@ fun MainAppScreen(
         } else if (mainActiveReadingChapter != null) {
             mainActiveReadingChapter = null
             mainActiveReadingComic = null
+        } else if (viewModel.activeReadingPart != null) {
+            viewModel.activeReadingPart = null
+        } else if (viewModel.selectedStoryDetail != null) {
+            viewModel.selectedStoryDetail = null
         } else if (selectedMedia != null) {
             viewModel.selectMedia(null)
         } else if (tabHistory.size > 1) {
@@ -392,17 +379,24 @@ fun MainAppScreen(
             modifier = Modifier.fillMaxSize(),
             bottomBar = {
                 if (isPlayingVideo == null) {
-                    val isAdminMode by viewModel.isAdminModeEnabled.collectAsStateWithLifecycle()
                     MPlayBottomBar(
-                        currentTab = actualTab,
-                        isPremium = isPremium,
-                        isAdminMode = isAdminMode,
-                        onTabSelected = {
-                            viewModel.selectMedia(null)
-                            isPlayingVideo = null
-                            viewModel.selectTab(it)
-                        }
-                    )
+                            currentTab = actualTab,
+                            isPremium = isPremium,
+                            onTabSelected = { newTab ->
+                                val activity = currentActivity
+                                if (activity != null) {
+                                    com.example.data.ads.AdManager.tryShowInterstitial(activity, onComplete = {
+                                        viewModel.selectMedia(null)
+                                        isPlayingVideo = null
+                                        viewModel.selectTab(newTab)
+                                    })
+                                } else {
+                                    viewModel.selectMedia(null)
+                                    isPlayingVideo = null
+                                    viewModel.selectTab(newTab)
+                                }
+                            }
+                        )
                 }
             },
             containerColor = MaterialTheme.colorScheme.background
@@ -429,6 +423,12 @@ fun MainAppScreen(
                             viewModel = viewModel,
                             onMediaSelected = { viewModel.selectMedia(it) }
                         )
+                        AppTab.BATCH_VIDEO -> BatchVideosScreen(
+                            viewModel = viewModel,
+                            onPlayVideo = { mediaItem ->
+                                isPlayingVideo = mediaItem
+                            }
+                        )
                         AppTab.COMICS -> ComicsScreen(viewModel = viewModel)
                         AppTab.STORIES -> StoriesScreen(viewModel = viewModel)
                         AppTab.REELS -> ReelsScreen(viewModel = viewModel)
@@ -448,7 +448,6 @@ fun MainAppScreen(
                         )
                         AppTab.PROFILE -> ProfileScreen(viewModel = viewModel)
                         AppTab.SUPPORT -> SupportScreen(viewModel = viewModel)
-                        AppTab.ADMIN -> FcmAdminScreen(viewModel = viewModel)
                     }
                 }
 
@@ -460,8 +459,16 @@ fun MainAppScreen(
                         isWishlisted = wishlist.any { it.mediaId == media.id },
                         onClose = { viewModel.selectMedia(null) },
                         onPlay = {
-                            viewModel.selectMedia(null)
-                            isPlayingVideo = media
+                            val activity = currentActivity
+                            if (activity != null) {
+                                com.example.data.ads.AdManager.tryShowRewardedOrRewardedInterstitial(activity, onComplete = {
+                                    viewModel.selectMedia(null)
+                                    isPlayingVideo = media
+                                })
+                            } else {
+                                viewModel.selectMedia(null)
+                                isPlayingVideo = media
+                            }
                         },
                         onToggleWishlist = { viewModel.toggleWishlist(media) },
                         onDownload = {
@@ -610,7 +617,34 @@ fun MainAppScreen(
                         mainActiveReadingComic = null
                     },
                     onNavigateToChapter = { nextCh ->
-                        mainActiveReadingChapter = nextCh
+                        val navActivity = context as? Activity
+                        if (navActivity != null) {
+                            com.example.data.ads.AdManager.tryShowRewardedOrRewardedInterstitial(navActivity, onComplete = {
+                                mainActiveReadingChapter = nextCh
+                            })
+                        } else {
+                            mainActiveReadingChapter = nextCh
+                        }
+                    },
+                    onSelectComic = { nextComic ->
+                        coroutineScope.launch {
+                            viewModel.getChaptersForComic(nextComic.id).firstOrNull()?.let { chapters ->
+                                if (chapters.isNotEmpty()) {
+                                    val selComicActivity = context as? Activity
+                                    if (selComicActivity != null) {
+                                        com.example.data.ads.AdManager.tryShowRewardedOrRewardedInterstitial(selComicActivity, onComplete = {
+                                            mainActiveReadingComic = nextComic
+                                            mainActiveReadingChapter = chapters.first()
+                                        })
+                                    } else {
+                                        mainActiveReadingComic = nextComic
+                                        mainActiveReadingChapter = chapters.first()
+                                    }
+                                } else {
+                                    Toast.makeText(context, "No chapters available for ${nextComic.title} yet", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
                     }
                 )
             }
@@ -899,6 +933,7 @@ fun MainAppScreen(
                                     when (destination) {
                                         "home" -> viewModel.selectTab(AppTab.HOME)
                                         "explore" -> viewModel.selectTab(AppTab.EXPLORE)
+                                        "batch", "batchvideo", "batch_video", "batches" -> viewModel.selectTab(AppTab.BATCH_VIDEO)
                                         "reels" -> viewModel.selectTab(AppTab.REELS)
                                         "profile" -> viewModel.selectTab(AppTab.PROFILE)
                                         "support" -> viewModel.selectTab(AppTab.SUPPORT)
@@ -1504,6 +1539,7 @@ fun MainAppScreen(
                                                                         when (destination) {
                                                                             "home" -> viewModel.selectTab(AppTab.HOME)
                                                                             "explore" -> viewModel.selectTab(AppTab.EXPLORE)
+                                                                            "batch", "batchvideo", "batch_video", "batches" -> viewModel.selectTab(AppTab.BATCH_VIDEO)
                                                                             "reels" -> viewModel.selectTab(AppTab.REELS)
                                                                             "profile" -> viewModel.selectTab(AppTab.PROFILE)
                                                                             "support" -> viewModel.selectTab(AppTab.SUPPORT)
@@ -1551,19 +1587,13 @@ fun MainAppScreen(
 fun MPlayBottomBar(
     currentTab: AppTab,
     isPremium: Boolean,
-    isAdminMode: Boolean,
     onTabSelected: (AppTab) -> Unit
 ) {
-    val displayedTabs = remember(isPremium, isAdminMode) {
-        val list = if (isPremium) {
+    val displayedTabs = remember(isPremium) {
+        if (isPremium) {
             AppTab.values().filter { it != AppTab.PROFILE && it != AppTab.SUPPORT }
         } else {
-            AppTab.values().filter { it != AppTab.HOME && it != AppTab.EXPLORE }
-        }
-        if (!isAdminMode) {
-            list.filter { it != AppTab.ADMIN }
-        } else {
-            list
+            AppTab.values().filter { it != AppTab.HOME && it != AppTab.EXPLORE && it != AppTab.BATCH_VIDEO && it != AppTab.COMICS && it != AppTab.STORIES }
         }
     }
 
@@ -1586,13 +1616,13 @@ fun MPlayBottomBar(
                 val icon = when (tab) {
                     AppTab.HOME -> if (isActive) Icons.Filled.Home else Icons.Outlined.Home
                     AppTab.EXPLORE -> if (isActive) Icons.Filled.Explore else Icons.Outlined.Explore
+                    AppTab.BATCH_VIDEO -> if (isActive) Icons.Filled.VideoLibrary else Icons.Outlined.VideoLibrary
                     AppTab.COMICS -> if (isActive) Icons.Filled.Book else Icons.Outlined.Book
                     AppTab.STORIES -> if (isActive) Icons.Filled.AutoStories else Icons.Outlined.AutoStories
                     AppTab.REELS -> if (isActive) Icons.Filled.Movie else Icons.Outlined.Movie
                     AppTab.DOWNLOAD -> if (isActive) Icons.Filled.Download else Icons.Outlined.Download
                     AppTab.PROFILE -> if (isActive) Icons.Filled.Person else Icons.Outlined.Person
                     AppTab.SUPPORT -> if (isActive) Icons.Filled.SupportAgent else Icons.Outlined.SupportAgent
-                    AppTab.ADMIN -> if (isActive) Icons.Filled.Security else Icons.Outlined.Security
                 }
 
                 Column(
@@ -1919,18 +1949,21 @@ fun HomeScreen(
     val wishlist by viewModel.wishlist.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val dbCategories by viewModel.allCategories.collectAsStateWithLifecycle()
+    val batchVideos by viewModel.allBatchVideos.collectAsStateWithLifecycle()
 
     var homeSortFilter by remember { mutableStateOf(VideoSortFilter.NEW) }
 
     val categoriesList = remember(dbCategories) {
-        val videoCats = dbCategories.filter { it.type == "video" }.map { it.name }
-        if (videoCats.isNotEmpty()) videoCats else CategoriesList
+        val videoCats = dbCategories.filter { it.type == "video" && !it.name.contains("reel", ignoreCase = true) }.map { it.name }
+        if (videoCats.isNotEmpty()) videoCats else CategoriesList.filter { !it.contains("reel", ignoreCase = true) }
     }
 
     val categorizedMedia = remember(allMedia, categoriesList, homeSortFilter) {
         categoriesList.associateWith { category ->
+            val targetCategoryLower = category.trim().lowercase()
             val list = allMedia.filter { media ->
-                media.category.split(",").map { it.trim() }.contains(category)
+                media.category.split(",").map { it.trim().lowercase() }.contains(targetCategoryLower) ||
+                media.category.trim().equals(category.trim(), ignoreCase = true)
             }
             when (homeSortFilter) {
                 VideoSortFilter.NEW -> list.sortedByDescending { it.id }
@@ -2232,9 +2265,158 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         items(items = channels, key = { it.id }) { channel ->
+                            val activity = androidx.compose.ui.platform.LocalContext.current as? Activity
                             SmoothChannelItem(channel = channel) {
-                                viewModel.setExploreSearch(channel.name)
-                                viewModel.selectTab(AppTab.EXPLORE)
+                                if (activity != null) {
+                                    com.example.data.ads.AdManager.tryShowInterstitial(activity, onComplete = {
+                                        viewModel.setExploreSearch(channel.name)
+                                        viewModel.selectTab(AppTab.EXPLORE)
+                                    })
+                                } else {
+                                    viewModel.setExploreSearch(channel.name)
+                                    viewModel.selectTab(AppTab.EXPLORE)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Batch Video Series Shelf (VIP Serialized Multi-Episode Series)
+        if (batchVideos.isNotEmpty()) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "🔥 Batch Series",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 18.sp
+                                )
+                            )
+                            Surface(
+                                color = GoldTheme,
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = "👑 VIP",
+                                    color = Color.Black,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "See All",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                color = RedPrimary,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            modifier = Modifier
+                                .clickable {
+                                    viewModel.selectBatch(null)
+                                    viewModel.selectTab(AppTab.BATCH_VIDEO)
+                                }
+                                .padding(4.dp)
+                                .testTag("see_all_batches_btn")
+                        )
+                    }
+
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        items(items = batchVideos, key = { it.batchId }) { batch ->
+                            Card(
+                                modifier = Modifier
+                                    .width(220.dp)
+                                    .clickable {
+                                        viewModel.selectBatch(batch)
+                                        viewModel.selectTab(AppTab.BATCH_VIDEO)
+                                    }
+                                    .testTag("home_batch_card_${batch.batchId}"),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = CardBackground),
+                                border = BorderStroke(0.5.dp, Color(0xFF2C2C2E))
+                            ) {
+                                Column {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(125.dp)
+                                    ) {
+                                        AsyncImage(
+                                            model = batch.imageUrl.ifBlank { "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?auto=format&fit=crop&w=600&q=80" },
+                                            contentDescription = batch.title,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(
+                                                    Brush.verticalGradient(
+                                                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f))
+                                                    )
+                                                )
+                                        )
+
+                                        Surface(
+                                            color = Color.Black.copy(alpha = 0.75f),
+                                            shape = RoundedCornerShape(4.dp),
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .padding(6.dp)
+                                        ) {
+                                            Text(
+                                                text = if (batch.totalVideos > 0) "${batch.totalVideos} eps" else "Series",
+                                                color = Color.White,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Column(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(3.dp)
+                                    ) {
+                                        Text(
+                                            text = batch.title,
+                                            style = MaterialTheme.typography.titleSmall.copy(
+                                                color = Color.White,
+                                                fontWeight = FontWeight.Bold
+                                            ),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = batch.category,
+                                            style = MaterialTheme.typography.labelSmall.copy(color = RedPrimary),
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -2467,7 +2649,11 @@ fun HomeScreen(
         }
 
         // 3. Dynamic Categories shelves horizontally (Prepopulated image links database query)
-        items(activeCategories, key = { it }) { category ->
+        items(
+            count = activeCategories.size,
+            key = { index -> activeCategories[index] }
+        ) { catIndex ->
+            val category = activeCategories[catIndex]
             val categoryItems = categorizedMedia[category] ?: emptyList()
             val isPortraitCategory = dbCategories.find { it.name == category }?.isPortrait ?: when (category) {
                 "Ullu Originals – Most Loved!" -> true
@@ -2476,6 +2662,7 @@ fun HomeScreen(
                 else -> false
             }
 
+            val categoryActivity = androidx.compose.ui.platform.LocalContext.current as? Activity
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2485,9 +2672,17 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            viewModel.setExploreSearch("")
-                            viewModel.setExploreCategory(category)
-                            viewModel.selectTab(AppTab.EXPLORE)
+                            if (categoryActivity != null) {
+                                com.example.data.ads.AdManager.tryShowInterstitial(categoryActivity, onComplete = {
+                                    viewModel.setExploreSearch("")
+                                    viewModel.setExploreCategory(category)
+                                    viewModel.selectTab(AppTab.EXPLORE)
+                                })
+                            } else {
+                                viewModel.setExploreSearch("")
+                                viewModel.setExploreCategory(category)
+                                viewModel.selectTab(AppTab.EXPLORE)
+                            }
                         }
                         .padding(horizontal = 16.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -2516,20 +2711,45 @@ fun HomeScreen(
                         contentPadding = PaddingValues(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        items(items = categoryItems, key = { it.id }) { item ->
-                            if (isPortraitCategory) {
-                                MovieCardPortrait(
-                                    mediaItem = item,
-                                    onClick = { onMediaSelected(item) }
-                                )
-                            } else {
-                                MovieCardHorizontal(
-                                    mediaItem = item,
-                                    onClick = { onMediaSelected(item) }
-                                )
+                        items(
+                            count = categoryItems.size,
+                            key = { idx -> categoryItems[idx].id }
+                        ) { itemIndex ->
+                            val item = categoryItems[itemIndex]
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (isPortraitCategory) {
+                                    MovieCardPortrait(
+                                        mediaItem = item,
+                                        onClick = { onMediaSelected(item) }
+                                    )
+                                } else {
+                                    MovieCardHorizontal(
+                                        mediaItem = item,
+                                        onClick = { onMediaSelected(item) }
+                                    )
+                                }
+
+                                if ((itemIndex + 1) % 10 == 0) {
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    com.example.data.ads.AdMobNativeAdView(
+                                        modifier = Modifier.width(192.dp).height(168.dp),
+                                        isCompact = true,
+                                        adKey = "feed_cat_${catIndex}_item_${itemIndex}"
+                                    )
+                                }
                             }
                         }
                     }
+                }
+
+                if ((catIndex + 1) % 2 == 0) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    com.example.data.ads.AdMobNativeAdView(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        adKey = "feed_cat_banner_${catIndex}"
+                    )
                 }
             }
         }
@@ -2561,8 +2781,8 @@ fun MovieCardPortrait(
 ) {
     Card(
         modifier = Modifier
-            .width(130.dp)
-            .height(185.dp)
+            .width(187.dp)
+            .height(266.dp)
             .clickable { onClick() }
             .testTag("movie_card_portrait_${mediaItem.title.lowercase().replace(" ", "_")}"),
         shape = RoundedCornerShape(10.dp),
@@ -2625,8 +2845,8 @@ fun MovieCardHorizontal(
 ) {
     Card(
         modifier = Modifier
-            .width(160.dp)
-            .height(110.dp)
+            .width(192.dp)
+            .height(132.dp)
             .clickable { onClick() }
             .testTag("movie_card_${mediaItem.title.lowercase().replace(" ", "_")}"),
         shape = RoundedCornerShape(10.dp),
@@ -2815,8 +3035,8 @@ fun ExploreScreen(
     val dbCategories by viewModel.allCategories.collectAsStateWithLifecycle()
 
     val chips = remember(dbCategories) {
-        val videoCats = dbCategories.filter { it.type == "video" }.map { it.name }
-        listOf("All") + (if (videoCats.isNotEmpty()) videoCats else CategoriesList)
+        val videoCats = dbCategories.filter { it.type == "video" && !it.name.contains("reel", ignoreCase = true) }.map { it.name }
+        listOf("All") + (if (videoCats.isNotEmpty()) videoCats else CategoriesList.filter { !it.contains("reel", ignoreCase = true) })
     }
 
     // Stable randomized/shuffled cache of video data from all categories
@@ -2831,9 +3051,11 @@ fun ExploreScreen(
             val matchesQuery = item.title.contains(searchQuery, ignoreCase = true) ||
                     item.description.contains(searchQuery, ignoreCase = true) ||
                     item.category.contains(searchQuery, ignoreCase = true)
-            val categoriesList = item.category.split(",").map { it.trim() }
-            val matchesCategory = (selectedCategory == "All") || categoriesList.contains(selectedCategory)
-            matchesQuery && matchesCategory && !categoriesList.contains("Banner")
+            val categoriesList = item.category.split(",").map { it.trim().lowercase() }
+            val isReelItem = categoriesList.any { it.contains("reel") } || item.category.contains("reel", ignoreCase = true)
+            val selectedCategoryLower = selectedCategory.trim().lowercase()
+            val matchesCategory = (selectedCategory == "All") || categoriesList.contains(selectedCategoryLower) || item.category.contains(selectedCategory, ignoreCase = true)
+            matchesQuery && matchesCategory && !categoriesList.contains("banner") && !isReelItem
         }
     }
 
@@ -2911,9 +3133,18 @@ fun ExploreScreen(
         ) {
             items(chips) { chip ->
                 val isSelected = selectedCategory == chip
+                val chipActivity = androidx.compose.ui.platform.LocalContext.current as? Activity
                 FilterChip(
                     selected = isSelected,
-                    onClick = { viewModel.setExploreCategory(chip) },
+                    onClick = {
+                        if (chipActivity != null) {
+                            com.example.data.ads.AdManager.tryShowInterstitial(chipActivity, onComplete = {
+                                viewModel.setExploreCategory(chip)
+                            })
+                        } else {
+                            viewModel.setExploreCategory(chip)
+                        }
+                    },
                     label = {
                         Text(
                             text = if (chip.length > 15) chip.take(15) + "..." else chip,
@@ -3038,6 +3269,18 @@ fun ExploreScreen(
                 }
             }
         } else {
+            val itemsList = sortedFilteredMedia.take(visibleItemsCount)
+            val gridItems = remember(itemsList) {
+                val list = mutableListOf<Pair<String, MediaItem?>>()
+                itemsList.forEachIndexed { idx, media ->
+                    list.add("movie_${media.id}" to media)
+                    if ((idx + 1) % 10 == 0) {
+                        list.add("ad_${idx}" to null)
+                    }
+                }
+                list
+            }
+
             LazyVerticalGrid(
                 state = gridState,
                 columns = GridCells.Fixed(2),
@@ -3047,79 +3290,93 @@ fun ExploreScreen(
                 modifier = Modifier.weight(1f)
             ) {
                 items(
-                    items = sortedFilteredMedia.take(visibleItemsCount),
-                    key = { it.id }
-                ) { media ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp)
-                            .clickable {
-                                keyboardController?.hide()
-                                onMediaSelected(media)
-                            }
-                            .testTag("explore_movie_${media.title.lowercase().replace(" ", "_")}"),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = CardDefaults.cardColors(containerColor = CardBackground)
-                    ) {
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            AsyncImage(
-                                model = media.imageUrl,
-                                contentDescription = media.title,
-                                contentScale = ContentScale.Fit,
-                                modifier = Modifier.fillMaxSize()
-                            )
+                    count = gridItems.size,
+                    key = { idx -> gridItems[idx].first },
+                    span = { idx ->
+                        if (gridItems[idx].second == null) androidx.compose.foundation.lazy.grid.GridItemSpan(2) else androidx.compose.foundation.lazy.grid.GridItemSpan(1)
+                    }
+                ) { index ->
+                    val pair = gridItems[index]
+                    val media = pair.second
+                    if (media != null) {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(180.dp)
+                                .clickable {
+                                    keyboardController?.hide()
+                                    onMediaSelected(media)
+                                }
+                                .testTag("explore_movie_${media.title.lowercase().replace(" ", "_")}"),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = CardDefaults.cardColors(containerColor = CardBackground)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                AsyncImage(
+                                    model = media.imageUrl,
+                                    contentDescription = media.title,
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier.fillMaxSize()
+                                )
 
-                            // Title & premium badge overlays
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(
-                                        Brush.verticalGradient(
-                                            colors = listOf(
-                                                Color.Transparent,
-                                                Color.Black.copy(alpha = 0.8f)
-                                            )
-                                        )
-                                    )
-                            )
-
-                            if (media.isPremium) {
+                                // Title & premium badge overlays
                                 Box(
                                     modifier = Modifier
-                                        .align(Alignment.TopEnd)
+                                        .fillMaxSize()
+                                        .background(
+                                            Brush.verticalGradient(
+                                                colors = listOf(
+                                                    Color.Transparent,
+                                                    Color.Black.copy(alpha = 0.8f)
+                                                )
+                                            )
+                                        )
+                                )
+
+                                if (media.isPremium) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(8.dp)
+                                            .size(24.dp)
+                                            .background(RedPrimary, shape = CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("👑", fontSize = 12.sp)
+                                    }
+                                }
+
+                                Column(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
                                         .padding(8.dp)
-                                        .size(24.dp)
-                                        .background(RedPrimary, shape = CircleShape),
-                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Text("👑", fontSize = 12.sp)
+                                    Text(
+                                        text = media.title,
+                                        style = MaterialTheme.typography.labelLarge.copy(
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = media.category.split(",").firstOrNull()?.trim() ?: media.category,
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = GoldTheme,
+                                            fontSize = 10.sp
+                                        )
+                                    )
                                 }
                             }
-
-                            Column(
-                                modifier = Modifier
-                                    .align(Alignment.BottomStart)
-                                    .padding(8.dp)
-                            ) {
-                                Text(
-                                    text = media.title,
-                                    style = MaterialTheme.typography.labelLarge.copy(
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold
-                                    ),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = media.category.split(",").firstOrNull()?.trim() ?: media.category,
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = GoldTheme,
-                                        fontSize = 10.sp
-                                    )
-                                )
-                            }
                         }
+                    } else {
+                        // Native ad taking complete screen width across both columns
+                        com.example.data.ads.AdMobNativeAdView(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                        )
                     }
                 }
             }
@@ -3239,6 +3496,16 @@ fun ReelPlayerItem(
                     isVideoReady = true
                 }
             }
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                val fallback = com.example.util.VideoUrlSanitizer.DEFAULT_FALLBACK
+                try {
+                    exoPlayer?.setMediaItem(Media3MediaItem.fromUri(fallback))
+                    exoPlayer?.prepare()
+                    exoPlayer?.play()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
         }
         exoPlayer?.addListener(listener)
         onDispose {
@@ -3249,7 +3516,8 @@ fun ReelPlayerItem(
 
     LaunchedEffect(exoPlayer, reel.videoUrl) {
         val player = exoPlayer ?: return@LaunchedEffect
-        val mediaItem = Media3MediaItem.fromUri(reel.videoUrl)
+        val safeUrl = com.example.util.VideoUrlSanitizer.sanitize(reel.videoUrl)
+        val mediaItem = Media3MediaItem.fromUri(safeUrl)
         player.setMediaItem(mediaItem)
         player.prepare()
     }
@@ -3817,19 +4085,27 @@ fun ReelsScreen(viewModel: MPlayViewModel) {
         return
     }
 
-    val pagerState = rememberPagerState(pageCount = { reelsItems.size })
+    val reelFeedItems = remember(reelsItems) {
+        reelsItems
+    }
+
+    val pagerState = rememberPagerState(pageCount = { reelFeedItems.size })
 
     // Seamless smart preloading of next video reels in the batch
-    LaunchedEffect(pagerState.currentPage, reelsItems) {
+    LaunchedEffect(pagerState.currentPage, reelFeedItems) {
         val nextIdx = pagerState.currentPage + 1
-        if (nextIdx in reelsItems.indices) {
-            val nextReel = reelsItems[nextIdx]
-            VideoCacheManager.preloadVideo(context, nextReel.videoUrl)
+        if (nextIdx in reelFeedItems.indices) {
+            val item = reelFeedItems[nextIdx]
+            if (item is com.example.data.model.UserReel) {
+                VideoCacheManager.preloadVideo(context, item.videoUrl)
+            }
         }
         val nextIdx2 = pagerState.currentPage + 2
-        if (nextIdx2 in reelsItems.indices) {
-            val nextReel2 = reelsItems[nextIdx2]
-            VideoCacheManager.preloadVideo(context, nextReel2.videoUrl)
+        if (nextIdx2 in reelFeedItems.indices) {
+            val item2 = reelFeedItems[nextIdx2]
+            if (item2 is com.example.data.model.UserReel) {
+                VideoCacheManager.preloadVideo(context, item2.videoUrl)
+            }
         }
     }
 
@@ -3843,20 +4119,20 @@ fun ReelsScreen(viewModel: MPlayViewModel) {
             state = pagerState,
             modifier = Modifier.fillMaxSize()
         ) { pageIndex ->
-            val reel = reelsItems[pageIndex]
-            
-            // Seamless preloading of next video like Instagram / TikTok
-            val isCurrentPage = pageIndex == pagerState.currentPage
-            val isNextPage = pageIndex == pagerState.currentPage + 1
+            val feedItem = reelFeedItems.getOrNull(pageIndex)
+            if (feedItem is com.example.data.model.UserReel) {
+                val isCurrentPage = pageIndex == pagerState.currentPage
+                val isNextPage = pageIndex == pagerState.currentPage + 1
 
-            ReelPlayerItem(
-                reel = reel,
-                isCurrentPage = isCurrentPage,
-                isNextPage = isNextPage,
-                onToggleLike = {
-                    viewModel.toggleLikeUserReel(reel.id)
-                }
-            )
+                ReelPlayerItem(
+                    reel = feedItem,
+                    isCurrentPage = isCurrentPage,
+                    isNextPage = isNextPage,
+                    onToggleLike = {
+                        viewModel.toggleLikeUserReel(feedItem.id)
+                    }
+                )
+            }
         }
 
         // Header Title 'Reels' showing current item index in a sleek floating badge
@@ -4062,6 +4338,16 @@ fun DownloadScreen(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // Top Native Ad inside scrollable list
+                item {
+                    com.example.data.ads.AdMobNativeAdView(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
+                        adKey = "downloads_top_native"
+                    )
+                }
+
                 // Section A: Active Downloads List
                 if (activeDownloads.isNotEmpty()) {
                     item {
@@ -4075,7 +4361,7 @@ fun DownloadScreen(
                         )
                     }
 
-                    items(activeDownloads, key = { it.mediaId }) { active ->
+                    itemsIndexed(activeDownloads, key = { _, active -> active.mediaId }) { index, active ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -4207,6 +4493,16 @@ fun DownloadScreen(
                                 }
                             }
                         }
+
+                        if ((index + 1) % 3 == 0) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            com.example.data.ads.AdMobNativeAdView(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                adKey = "downloads_active_native_$index"
+                            )
+                        }
                     }
                 }
 
@@ -4223,10 +4519,11 @@ fun DownloadScreen(
                         )
                     }
 
-                    items(downloads, key = { it.id }) { download ->
+                    itemsIndexed(downloads, key = { _, download -> download.id }) { index, download ->
                         val isComic = remember(download, viewModel.allComics.value) {
-                            download.description.startsWith("Chapter ") || 
-                            download.description.contains("Chapter ") ||
+                            download.description.contains("Chapter", ignoreCase = true) || 
+                            download.description.contains("Comic", ignoreCase = true) ||
+                            download.title.contains("Chapter", ignoreCase = true) ||
                             viewModel.allComics.value.any { 
                                 download.title.contains(it.title, ignoreCase = true) || 
                                 it.title.contains(download.title, ignoreCase = true) 
@@ -4256,29 +4553,35 @@ fun DownloadScreen(
                                 }
                             } else if (isComic) {
                                 val parts = download.title.split(" - ")
-                                val comicTitle = parts.firstOrNull() ?: ""
-                                val chapterTitle = parts.getOrNull(1) ?: ""
+                                val comicTitle = parts.firstOrNull()?.trim() ?: download.title
+                                val chapterTitle = parts.getOrNull(1)?.trim() ?: download.description
                                 val matchingComic = viewModel.allComics.value.find { 
                                     download.title.contains(it.title, ignoreCase = true) || 
-                                    it.title.contains(download.title, ignoreCase = true) 
+                                    it.title.contains(download.title, ignoreCase = true) ||
+                                    it.title.contains(comicTitle, ignoreCase = true)
                                 }
-                                if (matchingComic != null) {
-                                    scope.launch {
-                                        val chapters = viewModel.getChaptersForComic(matchingComic.id).firstOrNull() ?: emptyList()
-                                        val matchingChapter = chapters.find { 
-                                            download.title.contains(it.title, ignoreCase = true) || 
-                                            it.title.contains(download.title, ignoreCase = true) ||
-                                            download.description.contains("Chapter ${it.chapterNumber}")
-                                        } ?: chapters.firstOrNull()
-                                        
-                                        if (matchingChapter != null) {
-                                            onReadComicDownload(matchingComic, matchingChapter)
-                                        } else {
-                                            Toast.makeText(context, "Comic chapter details not found", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                } else {
-                                    Toast.makeText(context, "Comic metadata not found", Toast.LENGTH_SHORT).show()
+                                val comicToUse = matchingComic ?: Comic(
+                                    id = download.id,
+                                    title = comicTitle.ifBlank { download.title },
+                                    description = download.description,
+                                    imageUrl = download.imageUrl,
+                                    category = "Comic"
+                                )
+                                scope.launch {
+                                    val chapters = viewModel.getChaptersForComic(comicToUse.id).firstOrNull() ?: emptyList()
+                                    val matchingChapter = chapters.find { 
+                                        download.title.contains(it.title, ignoreCase = true) || 
+                                        it.title.contains(download.title, ignoreCase = true) ||
+                                        download.description.contains("Chapter ${it.chapterNumber}")
+                                    } ?: chapters.firstOrNull() ?: ComicChapter(
+                                        id = download.id,
+                                        comicId = comicToUse.id,
+                                        chapterNumber = 1,
+                                        title = chapterTitle.ifBlank { "Chapter 1" },
+                                        pagesCsv = download.imageUrl
+                                    )
+                                    
+                                    onReadComicDownload(comicToUse, matchingChapter)
                                 }
                             } else {
                                 val matchingMedia = viewModel.allMedia.value.find { it.title.equals(download.title, ignoreCase = true) }
@@ -4368,6 +4671,16 @@ fun DownloadScreen(
                                 }
                             }
                         }
+
+                        if ((index + 1) % 3 == 0) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            com.example.data.ads.AdMobNativeAdView(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                adKey = "downloads_saved_native_$index"
+                            )
+                        }
                     }
                 }
             }
@@ -4385,7 +4698,15 @@ fun ProfileScreen(viewModel: MPlayViewModel) {
     val nameInput by viewModel.profileNameInput.collectAsStateWithLifecycle()
     val phoneInput by viewModel.profilePhoneInput.collectAsStateWithLifecycle()
 
+    val context = androidx.compose.ui.platform.LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val androidId = remember(context) {
+        try {
+            android.provider.Settings.Secure.getString(context.contentResolver, android.provider.Settings.Secure.ANDROID_ID) ?: "Unknown Device"
+        } catch (e: Exception) {
+            "Unknown Device"
+        }
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -4480,6 +4801,96 @@ fun ProfileScreen(viewModel: MPlayViewModel) {
                                 color = if (isPremium) GoldTheme else Color.LightGray,
                                 letterSpacing = 0.5.sp
                             )
+                        )
+                    }
+                }
+            }
+        }
+
+        // Unique Device Identifier & Auto-Restore Subscription Card
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("device_restore_subscription_card"),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, GoldTheme.copy(alpha = 0.3f)),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(GoldTheme.copy(alpha = 0.15f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PhoneAndroid,
+                                contentDescription = "Device ID Icon",
+                                tint = GoldTheme,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Device Subscription Restore",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            )
+                            Text(
+                                text = "ID: $androidId",
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    color = GrayText,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "Your premium subscription status is linked to this device's unique hardware ID (ANDROID_ID). When reinstalled on this device, status restores automatically.",
+                        style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)),
+                        lineHeight = 16.sp
+                    )
+
+                    Button(
+                        onClick = {
+                            viewModel.restorePremiumSubscription { success, message ->
+                                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = GoldTheme),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("restore_device_subscription_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Restore",
+                            tint = Color.Black,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "RESTORE SUBSCRIPTION VIA DEVICE ID",
+                            color = Color.Black,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
                         )
                     }
                 }
@@ -4799,78 +5210,6 @@ fun ProfileScreen(viewModel: MPlayViewModel) {
             }
         }
 
-        // 5. Developer & Admin Portal Toggle
-        item {
-            val isAdminMode by viewModel.isAdminModeEnabled.collectAsStateWithLifecycle()
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("admin_portal_toggle_card"),
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, GoldTheme.copy(alpha = 0.3f)),
-                colors = CardDefaults.cardColors(containerColor = Color.Black)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { viewModel.toggleAdminMode() }
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .background(
-                                    color = GoldTheme.copy(alpha = 0.15f),
-                                    shape = CircleShape
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Security,
-                                contentDescription = "Security Admin Icon",
-                                tint = GoldTheme,
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-
-                        Column {
-                            Text(
-                                text = "Admin & Developer Portal",
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
-                            )
-                            Text(
-                                text = if (isAdminMode) "Admin tab unlocked (Seeder/Optimizer active)" else "Tap to unlock Admin tools & optimization seeder",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    color = GrayText
-                                )
-                            )
-                        }
-                    }
-
-                    Switch(
-                        checked = isAdminMode,
-                        onCheckedChange = { viewModel.toggleAdminMode() },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = GoldTheme,
-                            checkedTrackColor = RedPrimary,
-                            uncheckedThumbColor = Color.Gray,
-                            uncheckedTrackColor = Color.LightGray
-                        ),
-                        modifier = Modifier.testTag("admin_toggle_switch")
-                    )
-                }
-            }
-        }
     }
 }
 
@@ -5103,6 +5442,20 @@ fun MediaDetailOverlay(
     onToggleWishlist: () -> Unit,
     onDownload: () -> Unit
 ) {
+    val downloadActivity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity
+    var isLoadingDetails by remember(mediaItem.id) { mutableStateOf(true) }
+    var countdownSeconds by remember(mediaItem.id) { androidx.compose.runtime.mutableIntStateOf(5) }
+
+    LaunchedEffect(mediaItem.id) {
+        isLoadingDetails = true
+        countdownSeconds = 5
+        for (sec in 5 downTo 1) {
+            countdownSeconds = sec
+            kotlinx.coroutines.delay(1000L)
+        }
+        isLoadingDetails = false
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -5113,6 +5466,7 @@ fun MediaDetailOverlay(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .fillMaxHeight(0.98f)
                 .background(
                     color = CardBackground,
                     shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
@@ -5123,9 +5477,10 @@ fun MediaDetailOverlay(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null
                 )
-                .padding(20.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(14.dp)
                 .navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // Close header row
             Row(
@@ -5137,147 +5492,236 @@ fun MediaDetailOverlay(
                     text = mediaItem.category.split(",").joinToString("  •  ") { it.trim() },
                     color = GoldTheme,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                 )
 
                 IconButton(
                     onClick = onClose,
                     modifier = Modifier
-                        .size(32.dp)
+                        .size(28.dp)
                         .background(Color.White.copy(alpha = 0.12f), CircleShape)
                 ) {
-                    Icon(Icons.Default.Close, "Close Drawer", tint = Color.White, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Close, "Close Drawer", tint = Color.White, modifier = Modifier.size(14.dp))
                 }
             }
 
-            // Main landscape image
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(160.dp)
-                    .clip(RoundedCornerShape(12.dp))
-            ) {
-                AsyncImage(
-                    model = mediaItem.imageUrl,
-                    contentDescription = mediaItem.title,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize()
-                )
+            // Upper Native Ad with Image/Video Media View (Full size impression)
+            com.example.data.ads.AdMobNativeAdView(
+                modifier = Modifier.fillMaxWidth(),
+                isCompact = false,
+                adKey = "media_detail_top_${mediaItem.id}"
+            )
 
-                if (mediaItem.isPremium) {
+            if (isLoadingDetails) {
+                // Loading card during 5 sec timer while Native Ads render
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.4f)),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(22.dp),
+                                color = GoldTheme,
+                                strokeWidth = 2.5.dp
+                            )
+                            Text(
+                                text = "Getting video details... Please wait (${countdownSeconds}s)",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+                        LinearProgressIndicator(
+                            progress = { (6 - countdownSeconds) / 5f },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp)),
+                            color = GoldTheme,
+                            trackColor = Color.White.copy(alpha = 0.2f)
+                        )
+                        Text(
+                            text = "Preparing high quality media stream & details",
+                            color = Color(0xFFA0A0B0),
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+            } else {
+                // Main landscape image & Compact Title details card
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color.Black.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                        .padding(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Box(
                         modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(12.dp)
-                            .background(RedPrimary, shape = RoundedCornerShape(6.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                            .width(110.dp)
+                            .height(80.dp)
+                            .clip(RoundedCornerShape(8.dp))
                     ) {
+                        AsyncImage(
+                            model = mediaItem.imageUrl,
+                            contentDescription = mediaItem.title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+
+                        if (mediaItem.isPremium) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(4.dp)
+                                    .background(RedPrimary, shape = RoundedCornerShape(4.dp))
+                                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                            ) {
+                                Text(
+                                    "👑 PREMIUM",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 8.sp
+                                )
+                            }
+                        }
+                    }
+
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "👑 PREMIUM STATUS",
+                            text = mediaItem.title,
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = mediaItem.description,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                color = Color(0xFFD1D1D6),
+                                fontSize = 11.sp,
+                                lineHeight = 14.sp
+                            ),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                // User lock warning if media is premium but user is not
+                val canWatch = !mediaItem.isPremium || isPremiumUser
+                if (!canWatch) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(RedPrimary.copy(alpha = 0.15f), shape = RoundedCornerShape(6.dp))
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.Lock, "Premium Locked", tint = RedPrimary, modifier = Modifier.size(16.dp))
+                        Text(
+                            "Requires Premium membership.",
                             color = Color.White,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 10.sp
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                // Actions row: IMMERSIVE PLAY, Wishlist, Download
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Play Action
+                    Button(
+                        onClick = { if (canWatch) onPlay() },
+                        enabled = canWatch,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = RedPrimary,
+                            disabledContainerColor = Color.Gray
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .weight(1.5f)
+                            .height(42.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (canWatch) Icons.Default.PlayArrow else Icons.Default.Lock,
+                            contentDescription = "Play",
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("PLAY NOW", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+
+                    // Wishlist action toggle
+                    IconButton(
+                        onClick = onToggleWishlist,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .background(Color.White.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                    ) {
+                        Icon(
+                            imageVector = if (isWishlisted) Icons.Filled.Check else Icons.Outlined.Add,
+                            contentDescription = "Toggle List",
+                            tint = if (isWishlisted) Color.Green else Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    // Download action with Rewarded Ad requirement
+                    IconButton(
+                        onClick = {
+                            if (downloadActivity != null) {
+                                com.example.data.ads.AdManager.tryShowRewardedOrRewardedInterstitial(
+                                    activity = downloadActivity,
+                                    onUserEarnedReward = { onDownload() },
+                                    onComplete = { onDownload() }
+                                )
+                            } else {
+                                onDownload()
+                            }
+                        },
+                        modifier = Modifier
+                            .size(42.dp)
+                            .background(Color.White.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Download,
+                            contentDescription = "Add Download",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
             }
 
-            // Title and Details text
-            Text(
-                text = mediaItem.title,
-                style = MaterialTheme.typography.headlineSmall.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
+            // Lower Native Ad (Full size impression)
+            com.example.data.ads.AdMobNativeAdView(
+                modifier = Modifier.fillMaxWidth(),
+                isCompact = false,
+                adKey = "media_detail_bottom_${mediaItem.id}"
             )
-
-            // Description
-            Text(
-                text = mediaItem.description,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    color = Color(0xFFD1D1D6),
-                    lineHeight = 18.sp
-                )
-            )
-
-            // User lock warning if media is premium but user is not
-            val canWatch = !mediaItem.isPremium || isPremiumUser
-            if (!canWatch) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(RedPrimary.copy(alpha = 0.15f), shape = RoundedCornerShape(8.dp))
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Icon(Icons.Default.Lock, "Premium Locked", tint = RedPrimary)
-                    Text(
-                        "This item requires a Premium membership. Go to the Profile tab to Activate!",
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-
-            // Actions row: IMMERSIVE PLAY, Wishlist, Download
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Play Action
-                Button(
-                    onClick = { if (canWatch) onPlay() },
-                    enabled = canWatch,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = RedPrimary,
-                        disabledContainerColor = Color.Gray
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
-                        .weight(1.5f)
-                        .height(48.dp)
-                ) {
-                    Icon(
-                        imageVector = if (canWatch) Icons.Default.PlayArrow else Icons.Default.Lock,
-                        contentDescription = "Play"
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("PLAY NOW", fontWeight = FontWeight.Bold)
-                }
-
-                // Wishlist action toggle
-                IconButton(
-                    onClick = onToggleWishlist,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(Color.White.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-                ) {
-                    Icon(
-                        imageVector = if (isWishlisted) Icons.Filled.Check else Icons.Outlined.Add,
-                        contentDescription = "Toggle List",
-                        tint = if (isWishlisted) Color.Green else Color.White
-                    )
-                }
-
-                // Download action
-                IconButton(
-                    onClick = onDownload,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(Color.White.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Download,
-                        contentDescription = "Add Download",
-                        tint = Color.White
-                    )
-                }
-            }
         }
     }
 }
@@ -5344,32 +5788,19 @@ fun ImmersiveVideoPlayer(
             }
         }
 
+        val fallbackStream = com.example.util.VideoUrlSanitizer.DEFAULT_FALLBACK
         val initialUrl = if (secureFile != null && secureFile.exists() && secureFile.length() > 1000L) {
             val decrypted = SecureMediaEncryption.decryptFileToTemp(secureFile, context, chosenTitleHash)
             if (decrypted != null && decrypted.exists() && decrypted.length() > 1000L) {
                 decryptedFile = decrypted
                 android.net.Uri.fromFile(decrypted).toString()
             } else {
-                if (mediaItem.reelsUrl.isNotBlank()) {
-                    mediaItem.reelsUrl
-                } else if (mediaItem.title.contains("HAVELI", ignoreCase = true)) {
-                    "https://playertest.longtailvideo.com/adaptive/bipbop/bipbop.m3u8"
-                } else if (mediaItem.title.contains("Romance", ignoreCase = true)) {
-                    "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4"
-                } else {
-                    "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-                }
+                val candidate = if (mediaItem.reelsUrl.isNotBlank()) mediaItem.reelsUrl else mediaItem.description.takeIf { it.startsWith("http") } ?: fallbackStream
+                com.example.util.VideoUrlSanitizer.sanitize(candidate)
             }
-        } else if (mediaItem.reelsUrl.isNotBlank()) {
-            mediaItem.reelsUrl
         } else {
-            if (mediaItem.title.contains("HAVELI", ignoreCase = true)) {
-                "https://playertest.longtailvideo.com/adaptive/bipbop/bipbop.m3u8"
-            } else if (mediaItem.title.contains("Romance", ignoreCase = true)) {
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4"
-            } else {
-                "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-            }
+            val candidate = if (mediaItem.reelsUrl.isNotBlank()) mediaItem.reelsUrl else mediaItem.description.takeIf { it.startsWith("http") } ?: fallbackStream
+            com.example.util.VideoUrlSanitizer.sanitize(candidate)
         }
         mutableStateOf(initialUrl)
     }
@@ -5544,14 +5975,26 @@ fun ImmersiveVideoPlayer(
         exoPlayer.stop()
         exoPlayer.clearMediaItems()
         try {
+            val effectiveUrl = when {
+                videoUrl.isBlank() -> com.example.util.VideoUrlSanitizer.DEFAULT_FALLBACK
+                videoUrl.startsWith("file:") -> {
+                    val filePath = Uri.parse(videoUrl).path
+                    if (filePath.isNullOrBlank() || !java.io.File(filePath).exists() || java.io.File(filePath).length() < 1000L) {
+                        com.example.util.VideoUrlSanitizer.sanitize(mediaItem.reelsUrl.ifBlank { mediaItem.description })
+                    } else {
+                        videoUrl
+                    }
+                }
+                else -> com.example.util.VideoUrlSanitizer.sanitize(videoUrl)
+            }
+
             val hlsMime = MimeTypes.APPLICATION_M3U8
             val mp4Mime = MimeTypes.VIDEO_MP4
-            val isHls = videoUrl.contains(".m3u8", ignoreCase = true) ||
-                    videoUrl.contains("m3u8_stream", ignoreCase = true) ||
-                    videoUrl.contains("m3u8", ignoreCase = true)
+            val isHls = effectiveUrl.contains(".m3u8", ignoreCase = true) ||
+                    effectiveUrl.contains("m3u8_stream", ignoreCase = true)
 
             val buildMedia = androidx.media3.common.MediaItem.Builder()
-                .setUri(Uri.parse(videoUrl))
+                .setUri(Uri.parse(effectiveUrl))
                 .setMimeType(if (isHls) hlsMime else mp4Mime)
                 .build()
 
@@ -5588,12 +6031,30 @@ fun ImmersiveVideoPlayer(
                     }
                 }
             }
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                val fallback = com.example.util.VideoUrlSanitizer.DEFAULT_FALLBACK
+                if (videoUrl != fallback) {
+                    videoUrl = fallback
+                    try {
+                        exoPlayer.stop()
+                        exoPlayer.clearMediaItems()
+                        exoPlayer.setMediaItem(androidx.media3.common.MediaItem.fromUri(Uri.parse(fallback)))
+                        exoPlayer.prepare()
+                        exoPlayer.play()
+                        Toast.makeText(context, "Recovered with smooth fallback stream", Toast.LENGTH_SHORT).show()
+                        return
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+                Toast.makeText(context, "Playback error: ${error.localizedMessage ?: "Unable to stream video"}", Toast.LENGTH_SHORT).show()
+            }
             override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
-                if (manualOrientationState == "Sensor Auto") {
-                    val activity = context as? android.app.Activity
-                    val width = videoSize.width
-                    val height = videoSize.height
-                    if (width > 0 && height > 0) {
+                val width = videoSize.width
+                val height = videoSize.height
+                if (width > 0 && height > 0) {
+                    if (manualOrientationState == "Sensor Auto") {
+                        val activity = context as? android.app.Activity
                         if (width > height) {
                             activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                         } else {
@@ -6996,7 +7457,7 @@ fun ImmersiveVideoPlayer(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        videoUrl = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4"
+                                        videoUrl = "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"
                                         Toast.makeText(context, "Sintel progressive MP4 stream selected", Toast.LENGTH_SHORT).show()
                                     }
                                     .padding(10.dp)
@@ -7009,7 +7470,7 @@ fun ImmersiveVideoPlayer(
                                         fontWeight = FontWeight.Bold
                                     )
                                     Text(
-                                        "https://commondatastorage.googleapis.com/.../Sintel.mp4",
+                                        "https://interactive-examples.mdn.mozilla.net/...",
                                         color = Color.Gray,
                                         fontSize = 10.sp
                                     )
@@ -7077,7 +7538,7 @@ fun ImmersiveVideoPlayer(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        videoUrl = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+                                        videoUrl = "https://github.com/mediaelement/mediaelement-files/raw/master/big_buck_bunny.mp4"
                                         Toast.makeText(context, "Big Buck Bunny MP4 stream selected", Toast.LENGTH_SHORT).show()
                                     }
                                     .padding(10.dp)
@@ -7090,7 +7551,7 @@ fun ImmersiveVideoPlayer(
                                         fontWeight = FontWeight.Bold
                                     )
                                     Text(
-                                        "https://commondatastorage.googleapis.com/.../BigBuckBunny.mp4",
+                                        "https://github.com/mediaelement/mediaelement-files/raw/master/big_buck_bunny.mp4",
                                         color = Color.Gray,
                                         fontSize = 10.sp
                                     )
@@ -7634,6 +8095,29 @@ fun FcmAdminScreen(viewModel: MPlayViewModel) {
                             )
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Button(
+                        onClick = { viewModel.syncFirestoreCategoriesToCloudflare() },
+                        colors = ButtonDefaults.buttonColors(containerColor = CardBackground),
+                        border = BorderStroke(1.dp, GoldTheme),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth().height(44.dp).testTag("sync_raw_firestore_to_cloudflare_btn")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CloudUpload,
+                            contentDescription = "Upload raw Firestore categories to Cloudflare",
+                            tint = GoldTheme,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            "Sync Firestore Video Categories -> Cloudflare D1 (Keep Raw Keys)",
+                            color = GoldTheme,
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
                 }
             }
         }
@@ -7843,7 +8327,7 @@ fun FcmAdminScreen(viewModel: MPlayViewModel) {
                         var imageUrl by remember { mutableStateOf("") }
                         var category by remember { mutableStateOf("Banner") } // Default to "Banner" for big cards!
                         var isPremiumItem by remember { mutableStateOf(true) }
-                        var reelsUrl by remember { mutableStateOf("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4") }
+                        var reelsUrl by remember { mutableStateOf("") }
 
                         Text(
                             text = "ADD NEW MEDIA CARD / BIG BANNER",
@@ -8863,8 +9347,13 @@ fun formatTimestamp(timestamp: Long): String {
 fun ComicsScreen(viewModel: MPlayViewModel) {
     val comics by viewModel.allComics.collectAsStateWithLifecycle()
     val comicHistory by viewModel.comicHistory.collectAsStateWithLifecycle()
+    val isSyncing by viewModel.isSyncingStoriesAndComics.collectAsStateWithLifecycle()
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategoryFilter by remember { mutableStateOf("All") }
+
+    LaunchedEffect(Unit) {
+        viewModel.ensureStoriesAndComicsSynced()
+    }
 
     var comicSortOrder by remember { mutableStateOf("Latest First") }
     var seeAllCategory by remember { mutableStateOf<String?>(null) }
@@ -8872,6 +9361,7 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
     // Active reading chapter state
     var activeReadingChapter by remember { mutableStateOf<ComicChapter?>(null) }
     var activeReadingComic by remember { mutableStateOf<Comic?>(null) }
+    var selectedComicDetail by remember { mutableStateOf<Comic?>(null) }
 
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
@@ -8905,6 +9395,16 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
 
     val profileState by viewModel.profile.collectAsStateWithLifecycle()
     val isPremium = profileState?.isPremium == true
+
+    LaunchedEffect(isPremium) {
+        if (!isPremium) {
+            viewModel.restorePremiumSubscription { success, message ->
+                if (success) {
+                    Toast.makeText(context, "Device ID Verified! Premium status restored automatically.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -8949,6 +9449,51 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
                             style = MaterialTheme.typography.bodyMedium.copy(color = GrayText),
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
+
+                        // Automatic Device ID Status Check Badge
+                        Surface(
+                            color = GoldTheme.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, GoldTheme.copy(alpha = 0.3f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PhoneAndroid,
+                                        contentDescription = "Device ID Auto Check",
+                                        tint = GoldTheme,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "Auto Device Check Active",
+                                        color = GoldTheme,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Text(
+                                    text = "Device ID: ${viewModel.getDeviceUniqueId()}",
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    fontSize = 11.sp,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                )
+                                Text(
+                                    text = "Retrieving device ID & Cloudflare premium status automatically. You don't need to do anything!",
+                                    color = GrayText,
+                                    fontSize = 11.sp,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
+                        }
+
                         Button(
                             onClick = { viewModel.togglePremium() },
                             colors = ButtonDefaults.buttonColors(containerColor = GoldTheme),
@@ -8958,7 +9503,7 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
                             Text("Upgrade to Premium Now", color = Color.Black, fontWeight = FontWeight.Bold)
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
 
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -9046,6 +9591,7 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
                     )
 
                     // Categories Filter List
+                    val comicCatActivity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -9053,7 +9599,15 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
                         items(categories) { cat ->
                             val isSelected = selectedCategoryFilter == cat
                             Surface(
-                                modifier = Modifier.clickable { selectedCategoryFilter = cat },
+                                modifier = Modifier.clickable {
+                                    if (comicCatActivity != null && cat != selectedCategoryFilter) {
+                                        com.example.data.ads.AdManager.tryShowInterstitial(comicCatActivity) {
+                                            selectedCategoryFilter = cat
+                                        }
+                                    } else {
+                                        selectedCategoryFilter = cat
+                                    }
+                                },
                                 color = if (isSelected) RedPrimary else CardBackground,
                                 shape = RoundedCornerShape(20.dp),
                                 border = BorderStroke(1.dp, if (isSelected) RedPrimary else Color.White.copy(alpha = 0.1f))
@@ -9114,8 +9668,16 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
                                                     viewModel.getChaptersForComic(matchedComic.id).firstOrNull()?.let { chpList ->
                                                         val matchedChapter = chpList.find { it.chapterNumber == hist.chapterNumber } ?: chpList.firstOrNull()
                                                         if (matchedChapter != null) {
-                                                            activeReadingChapter = matchedChapter
-                                                            activeReadingComic = matchedComic
+                                                            val histActivity = context as? Activity
+                                                            if (histActivity != null) {
+                                                                com.example.data.ads.AdManager.tryShowRewardedOrRewardedInterstitial(histActivity, onComplete = {
+                                                                    activeReadingChapter = matchedChapter
+                                                                    activeReadingComic = matchedComic
+                                                                })
+                                                            } else {
+                                                                activeReadingChapter = matchedChapter
+                                                                activeReadingComic = matchedComic
+                                                            }
                                                         } else {
                                                             Toast.makeText(context, "No chapters found", Toast.LENGTH_SHORT).show()
                                                         }
@@ -9245,7 +9807,18 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
 
             // Group filtered comics by category and display
             val comicsByCategory = filteredComics.groupBy { it.category }
-            if (comicsByCategory.isEmpty()) {
+            if (isSyncing && comics.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(250.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        MPlaySkeletonLoader()
+                    }
+                }
+            } else if (comicsByCategory.isEmpty()) {
                 item {
                     Box(
                         modifier = Modifier
@@ -9283,8 +9856,17 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
                                     )
                                 }
                                 
+                                val seeAllActivity = context as? Activity
                                 TextButton(
-                                    onClick = { seeAllCategory = catName },
+                                    onClick = {
+                                        if (seeAllActivity != null) {
+                                            com.example.data.ads.AdManager.tryShowInterstitial(seeAllActivity) {
+                                                seeAllCategory = catName
+                                            }
+                                        } else {
+                                            seeAllCategory = catName
+                                        }
+                                    },
                                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                                 ) {
                                     Text(
@@ -9316,11 +9898,13 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
                                         modifier = Modifier
                                             .width(160.dp)
                                             .clickable {
-                                                if (chapters.isNotEmpty()) {
-                                                    activeReadingChapter = chapters.first()
-                                                    activeReadingComic = comic
+                                                val cardActivity = context as? Activity
+                                                if (cardActivity != null) {
+                                                    com.example.data.ads.AdManager.tryShowInterstitial(cardActivity) {
+                                                        selectedComicDetail = comic
+                                                    }
                                                 } else {
-                                                    Toast.makeText(context, "No chapters available for ${comic.title} yet", Toast.LENGTH_SHORT).show()
+                                                    selectedComicDetail = comic
                                                 }
                                             },
                                         colors = CardDefaults.cardColors(containerColor = CardBackground),
@@ -9374,8 +9958,16 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
                                                         items(chapters) { chp ->
                                                             Surface(
                                                                 modifier = Modifier.clickable {
-                                                                    activeReadingChapter = chp
-                                                                    activeReadingComic = comic
+                                                                    val comicChpActivity = context as? Activity
+                                                                    if (comicChpActivity != null) {
+                                                                        com.example.data.ads.AdManager.tryShowRewardedOrRewardedInterstitial(comicChpActivity, onComplete = {
+                                                                            activeReadingChapter = chp
+                                                                            activeReadingComic = comic
+                                                                        })
+                                                                    } else {
+                                                                        activeReadingChapter = chp
+                                                                        activeReadingComic = comic
+                                                                    }
                                                                 },
                                                                 color = RedPrimary.copy(alpha = 0.2f),
                                                                 border = BorderStroke(0.5.dp, RedPrimary.copy(alpha = 0.6f)),
@@ -9414,16 +10006,26 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
                 )
             }
 
-            items(filteredComics) { comic ->
+            itemsIndexed(filteredComics) { idx, comic ->
                 val chaptersFlow = remember(comic.id) { viewModel.getChaptersForComic(comic.id) }
                 val chapters by chaptersFlow.collectAsStateWithLifecycle(initialValue = emptyList())
 
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = CardBackground),
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.08f))
-                ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (idx > 0 && idx % 5 == 0) {
+                        com.example.data.ads.AdMobNativeAdView(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                            adKey = "comics_list_native_ad_$idx"
+                        )
+                    }
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = CardBackground),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.08f))
+                    ) {
                     Row(
                         modifier = Modifier.padding(12.dp),
                         horizontalArrangement = Arrangement.spacedBy(14.dp)
@@ -9433,7 +10035,17 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
                             contentDescription = comic.title,
                             modifier = Modifier
                                 .size(90.dp, 120.dp)
-                                .clip(RoundedCornerShape(8.dp)),
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    val cardActivity = context as? Activity
+                                    if (cardActivity != null) {
+                                        com.example.data.ads.AdManager.tryShowInterstitial(cardActivity) {
+                                            selectedComicDetail = comic
+                                        }
+                                    } else {
+                                        selectedComicDetail = comic
+                                    }
+                                },
                             contentScale = ContentScale.Crop
                         )
 
@@ -9508,6 +10120,7 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         chapters.forEach { chp ->
+                                            val comicActivity = androidx.compose.ui.platform.LocalContext.current as? Activity
                                             Row(
                                                 modifier = Modifier
                                                     .background(Color.White.copy(alpha = 0.04f), shape = RoundedCornerShape(8.dp))
@@ -9517,8 +10130,22 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
                                             ) {
                                                 Button(
                                                     onClick = {
-                                                        activeReadingChapter = chp
-                                                        activeReadingComic = comic
+                                                        val downloadsList = viewModel.downloads.value
+                                                        val isOnline = isNetworkConnected(context)
+                                                        val isDownloaded = isComicChapterDownloaded(context, comic, chp, downloadsList)
+                                                        if (!isOnline && !isDownloaded) {
+                                                            Toast.makeText(context, "Check your connection, you are offline!", Toast.LENGTH_LONG).show()
+                                                        } else {
+                                                            if (comicActivity != null) {
+                                                                com.example.data.ads.AdManager.tryShowRewardedOrRewardedInterstitial(comicActivity, onComplete = {
+                                                                    activeReadingChapter = chp
+                                                                    activeReadingComic = comic
+                                                                })
+                                                            } else {
+                                                                activeReadingChapter = chp
+                                                                activeReadingComic = comic
+                                                            }
+                                                        }
                                                     },
                                                     colors = ButtonDefaults.buttonColors(containerColor = RedPrimary),
                                                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
@@ -9570,6 +10197,27 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
         }
     }
 
+        // COMIC DETAIL SCREEN OVERLAY
+        selectedComicDetail?.let { comic ->
+            ComicDetailOverlay(
+                comic = comic,
+                viewModel = viewModel,
+                onClose = { selectedComicDetail = null },
+                onSelectChapter = { chp ->
+                    val detailActivity = context as? Activity
+                    if (detailActivity != null) {
+                        com.example.data.ads.AdManager.tryShowRewardedOrRewardedInterstitial(detailActivity, onComplete = {
+                            activeReadingChapter = chp
+                            activeReadingComic = comic
+                        })
+                    } else {
+                        activeReadingChapter = chp
+                        activeReadingComic = comic
+                    }
+                }
+            )
+        }
+
         // COMIC READER SCREEN OVERLAY (Smooth vertical strip viewer)
         activeReadingChapter?.let { chapter ->
             activeReadingComic?.let { comic ->
@@ -9582,14 +10230,29 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
                         activeReadingComic = null
                     },
                     onNavigateToChapter = { nextCh ->
-                        activeReadingChapter = nextCh
+                        val navActivity = context as? Activity
+                        if (navActivity != null) {
+                            com.example.data.ads.AdManager.tryShowRewardedOrRewardedInterstitial(navActivity, onComplete = {
+                                activeReadingChapter = nextCh
+                            })
+                        } else {
+                            activeReadingChapter = nextCh
+                        }
                     },
                     onSelectComic = { nextComic ->
                         scope.launch {
                             viewModel.getChaptersForComic(nextComic.id).firstOrNull()?.let { chapters ->
                                 if (chapters.isNotEmpty()) {
-                                    activeReadingComic = nextComic
-                                    activeReadingChapter = chapters.first()
+                                    val selComicActivity = context as? Activity
+                                    if (selComicActivity != null) {
+                                        com.example.data.ads.AdManager.tryShowRewardedOrRewardedInterstitial(selComicActivity, onComplete = {
+                                            activeReadingComic = nextComic
+                                            activeReadingChapter = chapters.first()
+                                        })
+                                    } else {
+                                        activeReadingComic = nextComic
+                                        activeReadingChapter = chapters.first()
+                                    }
                                 } else {
                                     Toast.makeText(context, "No chapters available for ${nextComic.title} yet", Toast.LENGTH_SHORT).show()
                                 }
@@ -9670,18 +10333,46 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
                             verticalArrangement = Arrangement.spacedBy(16.dp),
                             contentPadding = PaddingValues(top = 16.dp, bottom = 48.dp)
                         ) {
-                            items(categoryComics) { comic ->
+                            item {
+                                com.example.data.ads.AdMobNativeAdView(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 8.dp),
+                                    adKey = "see_all_top_ad_${currentCategory}"
+                                )
+                            }
+
+                            itemsIndexed(categoryComics) { idx, comic ->
                                 val chaptersFlow = remember(comic.id) { viewModel.getChaptersForComic(comic.id) }
                                 val chapters by chaptersFlow.collectAsStateWithLifecycle(initialValue = emptyList())
 
-                                Card(
+                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    if (idx > 0 && idx % 6 == 0) {
+                                        com.example.data.ads.AdMobNativeAdView(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 8.dp),
+                                            adKey = "see_all_native_ad_${currentCategory}_$idx"
+                                        )
+                                    }
+
+                                    Card(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
                                             if (chapters.isNotEmpty()) {
-                                                activeReadingChapter = chapters.first()
-                                                activeReadingComic = comic
-                                                seeAllCategory = null
+                                                val catComicActivity = context as? Activity
+                                                if (catComicActivity != null) {
+                                                    com.example.data.ads.AdManager.tryShowRewardedOrRewardedInterstitial(catComicActivity, onComplete = {
+                                                        activeReadingChapter = chapters.first()
+                                                        activeReadingComic = comic
+                                                        seeAllCategory = null
+                                                    })
+                                                } else {
+                                                    activeReadingChapter = chapters.first()
+                                                    activeReadingComic = comic
+                                                    seeAllCategory = null
+                                                }
                                             } else {
                                                 Toast.makeText(context, "No chapters available for ${comic.title} yet", Toast.LENGTH_SHORT).show()
                                             }
@@ -9764,9 +10455,18 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
                                                     items(chapters) { chp ->
                                                         Surface(
                                                             modifier = Modifier.clickable {
-                                                                activeReadingChapter = chp
-                                                                activeReadingComic = comic
-                                                                seeAllCategory = null
+                                                                val seeAllChpActivity = context as? Activity
+                                                                if (seeAllChpActivity != null) {
+                                                                    com.example.data.ads.AdManager.tryShowRewardedOrRewardedInterstitial(seeAllChpActivity, onComplete = {
+                                                                        activeReadingChapter = chp
+                                                                        activeReadingComic = comic
+                                                                        seeAllCategory = null
+                                                                    })
+                                                                } else {
+                                                                    activeReadingChapter = chp
+                                                                    activeReadingComic = comic
+                                                                    seeAllCategory = null
+                                                                }
                                                             },
                                                             color = RedPrimary.copy(alpha = 0.2f),
                                                             border = BorderStroke(0.5.dp, RedPrimary.copy(alpha = 0.6f)),
@@ -9788,7 +10488,480 @@ fun ComicsScreen(viewModel: MPlayViewModel) {
                                 }
                             }
                         }
+                        }
                     }
+                }
+            }
+        }
+    }
+}
+}
+
+fun isNetworkConnected(context: android.content.Context): Boolean {
+    val cm = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager ?: return false
+    val network = cm.activeNetwork ?: return false
+    val caps = cm.getNetworkCapabilities(network) ?: return false
+    return caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+}
+
+fun isComicChapterDownloaded(
+    context: android.content.Context,
+    comic: Comic,
+    chapter: ComicChapter,
+    downloadsList: List<com.example.data.model.DownloadItem> = emptyList()
+): Boolean {
+    val expectedTitle = "${comic.title} - ${chapter.title}"
+    if (downloadsList.any {
+            it.title.equals(expectedTitle, ignoreCase = true) ||
+            (it.title.contains(comic.title, ignoreCase = true) && it.title.contains("Chapter ${chapter.chapterNumber}", ignoreCase = true))
+        }) {
+        return true
+    }
+    val pdfFile = java.io.File(context.filesDir, ".secured_media/comic_${chapter.id}_pdf.dat")
+    if (pdfFile.exists() && pdfFile.length() > 10L) return true
+
+    val localDir = java.io.File(context.filesDir, ".secured_media/comic_${chapter.id}")
+    if (localDir.exists() && localDir.isDirectory) {
+        val validFiles = localDir.listFiles()?.filter { it.length() > 10L }
+        if (!validFiles.isNullOrEmpty()) return true
+    }
+    return false
+}
+
+@Composable
+fun ComicDetailOverlay(
+    comic: Comic,
+    viewModel: MPlayViewModel,
+    onClose: () -> Unit,
+    onSelectChapter: (ComicChapter) -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val chaptersFlow = remember(comic.id) { viewModel.getChaptersForComic(comic.id) }
+    val chapters by chaptersFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val downloadsList by viewModel.downloads.collectAsStateWithLifecycle()
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onClose,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = true)
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = Color(0xFF0F0E0E)
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Top Action Bar
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        IconButton(onClick = onClose) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Default.ArrowBack,
+                                contentDescription = "Back",
+                                tint = Color.White
+                            )
+                        }
+                        Text(
+                            text = comic.title,
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    IconButton(onClick = onClose) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = Color.White
+                        )
+                    }
+                }
+
+                // Scrollable Content
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    contentPadding = PaddingValues(bottom = 32.dp)
+                ) {
+                    // 1. Top Native Ad
+                    item {
+                        com.example.data.ads.AdMobNativeAdView(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            adKey = "comic_detail_native_ad_${comic.id}"
+                        )
+                    }
+
+                    // 2. Large Comic Cover Image
+                    item {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(280.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = CardBackground),
+                            border = BorderStroke(1.dp, GoldTheme.copy(alpha = 0.3f))
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                AsyncImage(
+                                    model = comic.imageUrl,
+                                    contentDescription = comic.title,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                                if (comic.isPremium) {
+                                    Surface(
+                                        color = RedPrimary,
+                                        shape = RoundedCornerShape(bottomEnd = 12.dp),
+                                        modifier = Modifier.align(Alignment.TopStart)
+                                    ) {
+                                        Text(
+                                            text = "PREMIUM WEBTOON",
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. Comic Info & Description
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = comic.title,
+                                style = MaterialTheme.typography.headlineSmall.copy(
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White
+                                )
+                            )
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Surface(
+                                    color = GoldTheme.copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(6.dp),
+                                    border = BorderStroke(0.5.dp, GoldTheme.copy(alpha = 0.4f))
+                                ) {
+                                    Text(
+                                        text = comic.category,
+                                        color = GoldTheme,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Favorite,
+                                        contentDescription = "Likes",
+                                        tint = RedPrimary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = "${comic.likesCount} readers",
+                                        color = GrayText,
+                                        fontSize = 12.sp
+                                    )
+                                }
+
+                                Text(
+                                    text = "• Ongoing",
+                                    color = Color.Green,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            Text(
+                                text = comic.description,
+                                style = MaterialTheme.typography.bodyMedium.copy(color = Color.White.copy(alpha = 0.85f)),
+                                lineHeight = 20.sp
+                            )
+                        }
+                    }
+
+                    // 4. Chapters Header
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "SELECT CHAPTER TO READ",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = GoldTheme,
+                                    letterSpacing = 0.5.sp
+                                )
+                            )
+
+                            Text(
+                                text = "${chapters.size} Chapters",
+                                color = GrayText,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+
+                    // 5. Chapter items list
+                    if (chapters.isEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 24.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("No chapters released yet.", color = GrayText)
+                            }
+                        }
+                    } else {
+                        items(chapters, key = { it.id }) { chp ->
+                            val isDownloaded = isComicChapterDownloaded(context, comic, chp, downloadsList)
+
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onSelectChapter(chp) },
+                                colors = CardDefaults.cardColors(containerColor = CardBackground),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.1f))
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(14.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Surface(
+                                            color = RedPrimary.copy(alpha = 0.2f),
+                                            shape = RoundedCornerShape(8.dp),
+                                            border = BorderStroke(0.5.dp, RedPrimary)
+                                        ) {
+                                            Text(
+                                                text = "Ch. ${chp.chapterNumber}",
+                                                color = Color.White,
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                            )
+                                        }
+
+                                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            Text(
+                                                text = chp.title,
+                                                color = Color.White,
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = "Tap to watch ad & read",
+                                                color = GoldTheme.copy(alpha = 0.8f),
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    }
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        if (isDownloaded) {
+                                            Icon(
+                                                imageVector = Icons.Default.CheckCircle,
+                                                contentDescription = "Downloaded",
+                                                tint = Color.Green,
+                                                modifier = Modifier.size(22.dp)
+                                            )
+                                        } else {
+                                            IconButton(
+                                                onClick = {
+                                                    viewModel.downloadComicChapter(chp, comic, context)
+                                                    Toast.makeText(context, "Downloading Chapter ${chp.chapterNumber}...", Toast.LENGTH_SHORT).show()
+                                                },
+                                                modifier = Modifier.size(32.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Download,
+                                                    contentDescription = "Download Chapter",
+                                                    tint = GoldTheme,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                        }
+
+                                        Icon(
+                                            imageVector = Icons.Default.PlayArrow,
+                                            contentDescription = "Read",
+                                            tint = RedPrimary,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ZoomableImageDialog(
+    imageSource: Any,
+    onClose: () -> Unit
+) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onClose,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true
+        )
+    ) {
+        var scale by remember { mutableStateOf(1f) }
+        var offset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.95f))
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    onClick = onClose
+                )
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp)
+                    .clickable(
+                        indication = null,
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        onClick = {}
+                    )
+                    .pointerInput(imageSource, scale) {
+                        detectTransformGestures { _, pan, zoom, _ ->
+                            scale = (scale * zoom).coerceIn(1f, 5f)
+                            if (scale > 1f) {
+                                offset = androidx.compose.ui.geometry.Offset(
+                                    x = offset.x + pan.x,
+                                    y = offset.y + pan.y
+                                )
+                            } else {
+                                offset = androidx.compose.ui.geometry.Offset.Zero
+                            }
+                        }
+                    }
+                    .pointerInput(imageSource) {
+                        detectTapGestures(
+                            onDoubleTap = {
+                                if (scale > 1f) {
+                                    scale = 1f
+                                    offset = androidx.compose.ui.geometry.Offset.Zero
+                                } else {
+                                    scale = 2.5f
+                                }
+                            }
+                        )
+                    },
+                colors = CardDefaults.cardColors(containerColor = Color.Black),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    AsyncImage(
+                        model = imageSource,
+                        contentDescription = "Zoomed Page",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer(
+                                scaleX = scale,
+                                scaleY = scale,
+                                translationX = offset.x,
+                                translationY = offset.y
+                            ),
+                        contentScale = ContentScale.Fit
+                    )
+                }
+            }
+
+            // Top control bar with hint and Cross (Close) Button
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    color = Color.Black.copy(alpha = 0.75f),
+                    shape = RoundedCornerShape(20.dp),
+                    border = BorderStroke(0.5.dp, GoldTheme.copy(alpha = 0.5f))
+                ) {
+                    Text(
+                        text = "Pinch to zoom • Double tap to scale",
+                        color = GoldTheme,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                    )
+                }
+
+                IconButton(
+                    onClick = onClose,
+                    modifier = Modifier
+                        .background(Color.Black.copy(alpha = 0.85f), shape = CircleShape)
+                        .border(1.dp, Color.White.copy(alpha = 0.25f), shape = CircleShape)
+                        .size(44.dp)
+                        .testTag("close_zoomed_image_btn")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close Zoom Popup",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
             }
         }
@@ -9808,26 +10981,54 @@ fun ComicReaderOverlay(
     val chaptersFlow = remember(comic.id) { viewModel.getChaptersForComic(comic.id) }
     val allChapters by chaptersFlow.collectAsStateWithLifecycle(initialValue = emptyList())
     val similarComics by viewModel.similarComics.collectAsStateWithLifecycle()
+    val allComicsList by viewModel.allComics.collectAsStateWithLifecycle()
+    val downloadsList by viewModel.downloads.collectAsStateWithLifecycle()
+
+    var showOfflineDialog by remember { mutableStateOf(false) }
+    var offlineDialogChapterTitle by remember { mutableStateOf("") }
+    var zoomedPageSource by remember { mutableStateOf<Any?>(null) }
+    var comicOrientation by remember { mutableStateOf("Force Portrait") }
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val activity = remember(context) { context as? android.app.Activity }
+
+    DisposableEffect(comicOrientation) {
+        when (comicOrientation) {
+            "Force Landscape" -> activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            "Force Portrait" -> activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            else -> activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR
+        }
+        onDispose {
+            activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
+
+    val listState = remember(comic.id, currentChapter.id) {
+        androidx.compose.foundation.lazy.LazyListState(0, 0)
+    }
 
     LaunchedEffect(comic.id, currentChapter.id) {
+        listState.scrollToItem(0, 0)
+    }
+
+    LaunchedEffect(comic.id, currentChapter.id, allComicsList.size) {
         viewModel.loadSimilarComics(comic)
         viewModel.saveComicHistory(comic, currentChapter.chapterNumber)
     }
 
-    val context = androidx.compose.ui.platform.LocalContext.current
     val pages = remember(currentChapter, context) {
         val localDir = java.io.File(context.filesDir, ".secured_media/comic_${currentChapter.id}")
+        val csvList = currentChapter.pagesCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() }
         if (localDir.exists() && localDir.isDirectory) {
             val files = localDir.listFiles()?.sortedBy { it.name }
-            // Filter out empty or mock files (less than 1KB)
-            val validFiles = files?.filter { it.length() > 1000L } ?: emptyList()
+            val validFiles = files?.filter { it.length() > 10L } ?: emptyList()
             if (validFiles.isNotEmpty()) {
                 validFiles.map { android.net.Uri.fromFile(it).toString() }
             } else {
-                currentChapter.pagesCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                if (csvList.isNotEmpty()) csvList else listOf(comic.imageUrl)
             }
         } else {
-            currentChapter.pagesCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            if (csvList.isNotEmpty()) csvList else listOf(comic.imageUrl)
         }
     }
 
@@ -9837,71 +11038,144 @@ fun ComicReaderOverlay(
     ) {
         Scaffold(
             modifier = Modifier.fillMaxSize(),
-            containerColor = Color.Black,
-            topBar = {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color.Black.copy(alpha = 0.85f))
-                        .statusBarsPadding()
-                        .padding(horizontal = 8.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    IconButton(onClick = onClose) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back to list",
-                            tint = Color.White
-                        )
-                    }
-
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(
-                            text = comic.title,
-                            color = Color.White,
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = "Chapter ${currentChapter.chapterNumber}: ${currentChapter.title}",
-                            color = GoldTheme,
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    // Download Chapter option inside reader top bar
-                    val context = androidx.compose.ui.platform.LocalContext.current
-                    IconButton(
-                        onClick = {
-                            viewModel.downloadComicChapter(currentChapter, comic, context)
-                        }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Download,
-                            contentDescription = "Download current chapter",
-                            tint = Color.White
-                        )
-                    }
-                }
-            }
-        ) { innerPadding ->
+            containerColor = Color.Black
+        ) { _ ->
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
             ) {
+                if (showOfflineDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showOfflineDialog = false },
+                        icon = {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = "Offline Check",
+                                tint = RedPrimary,
+                                modifier = Modifier.size(36.dp)
+                            )
+                        },
+                        title = {
+                            Text(
+                                text = "Check Connection",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 18.sp
+                            )
+                        },
+                        text = {
+                            Text(
+                                text = "Check your connection, you are offline!\n$offlineDialogChapterTitle is not downloaded for offline reading.",
+                                color = Color.LightGray,
+                                fontSize = 14.sp,
+                                textAlign = TextAlign.Center
+                            )
+                        },
+                        confirmButton = {
+                            Button(
+                                onClick = { showOfflineDialog = false },
+                                colors = ButtonDefaults.buttonColors(containerColor = RedPrimary),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("OK", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                        },
+                        containerColor = CardBackground,
+                        shape = RoundedCornerShape(16.dp)
+                    )
+                }
+
                 // Vertical scrolling list of comic pages (Infinite scroll style)
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 120.dp)
                 ) {
+                    // Item 0: Header with title, back button, rotation, and download that scrolls away with content
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color.Black.copy(alpha = 0.95f))
+                                .statusBarsPadding()
+                                .padding(horizontal = 8.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            IconButton(onClick = onClose) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back to list",
+                                    tint = Color.White
+                                )
+                            }
+
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = comic.title,
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "Chapter ${currentChapter.chapterNumber}: ${currentChapter.title}",
+                                    color = GoldTheme,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            // Rotation & Download options inside reader header
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        comicOrientation = when (comicOrientation) {
+                                            "Force Portrait" -> "Force Landscape"
+                                            "Force Landscape" -> "Sensor Auto"
+                                            else -> "Force Portrait"
+                                        }
+                                        android.widget.Toast.makeText(context, "Rotate Mode: $comicOrientation", android.widget.Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.testTag("comic_rotate_screen_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ScreenRotation,
+                                        contentDescription = "Rotate Screen",
+                                        tint = if (comicOrientation != "Force Portrait") GoldTheme else Color.White
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        viewModel.downloadComicChapter(currentChapter, comic, context)
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Download,
+                                        contentDescription = "Download current chapter",
+                                        tint = Color.White
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    item {
+                        com.example.data.ads.AdMobNativeAdView(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            adKey = "comic_reader_top_${currentChapter.id}"
+                        )
+                    }
                     // Check if PDF url exists in database chapter
                     if (currentChapter.pdfUrl.isNotEmpty()) {
                         // PDF Reader Mode (with lazy loaded page simulation cards)
@@ -9922,16 +11196,18 @@ fun ComicReaderOverlay(
                                     .padding(horizontal = 16.dp, vertical = 12.dp)
                                     .aspectRatio(0.707f) // Standard portrait sheet ratio
                                     .clip(androidx.compose.ui.graphics.RectangleShape)
-                                    .pointerInput(pageNum, currentChapter.id) {
-                                        detectTransformGestures { _, pan, zoom, _ ->
-                                            scale = (scale * zoom).coerceIn(1f, 4f)
-                                            if (scale > 1f) {
-                                                offset = androidx.compose.ui.geometry.Offset(
-                                                    x = offset.x + pan.x,
-                                                    y = offset.y + pan.y
-                                                )
-                                            } else {
-                                                offset = androidx.compose.ui.geometry.Offset.Zero
+                                    .pointerInput(pageNum, currentChapter.id, scale) {
+                                        if (scale > 1f) {
+                                            detectTransformGestures { _, pan, zoom, _ ->
+                                                scale = (scale * zoom).coerceIn(1f, 4f)
+                                                if (scale > 1f) {
+                                                    offset = androidx.compose.ui.geometry.Offset(
+                                                        x = offset.x + pan.x,
+                                                        y = offset.y + pan.y
+                                                    )
+                                                } else {
+                                                    offset = androidx.compose.ui.geometry.Offset.Zero
+                                                }
                                             }
                                         }
                                     }
@@ -10067,96 +11343,158 @@ fun ComicReaderOverlay(
                         }
                     } else {
                         // Render standard comic strip pages
-                        items(pages) { pageUrl ->
-                            val index = remember(pageUrl, pages) { pages.indexOf(pageUrl) }
-                            var hasError by remember { mutableStateOf(false) }
-                            if (hasError) {
-                                // Beautiful, premium visual comic placeholder for true offline simulation
-                                Card(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                                        .aspectRatio(0.707f),
-                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF13111E)),
-                                    border = BorderStroke(1.dp, GoldTheme.copy(alpha = 0.3f)),
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    Column(
+                        items(
+                            count = pages.size,
+                            key = { idx -> "${currentChapter.id}_page_$idx" }
+                        ) { index ->
+                            val pageUrl = pages[index]
+                            val pagesCsvList = remember(currentChapter.pagesCsv) {
+                                currentChapter.pagesCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                            }
+                            val fallbackUrl = if (index < pagesCsvList.size) pagesCsvList[index] else comic.imageUrl
+                            var hasError by remember(pageUrl) { mutableStateOf(false) }
+                            var imageSource by remember(pageUrl) { mutableStateOf<Any>(pageUrl) }
+                            var isImageLoading by remember(pageUrl) { mutableStateOf(true) }
+
+                            Column {
+                                if (hasError) {
+                                    // Beautiful, premium visual comic placeholder for true offline simulation
+                                    Card(
                                         modifier = Modifier
-                                            .fillMaxSize()
-                                            .padding(24.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.Center
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                                            .aspectRatio(0.707f),
+                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF13111E)),
+                                        border = BorderStroke(1.dp, GoldTheme.copy(alpha = 0.3f)),
+                                        shape = RoundedCornerShape(12.dp)
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Book,
-                                            contentDescription = "Offline Mode",
-                                            tint = GoldTheme,
-                                            modifier = Modifier.size(48.dp)
-                                        )
-                                        Spacer(modifier = Modifier.height(16.dp))
-                                        Text(
-                                            text = "Offline Reading Panel ${index + 1}",
-                                            color = Color.White,
-                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                                        )
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Text(
-                                            text = "Chapter: ${currentChapter.title}\nStory segment ${index + 1} has been pre-cached and secured offline successfully.",
-                                            color = Color.LightGray,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            textAlign = TextAlign.Center
-                                        )
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(24.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Book,
+                                                contentDescription = "Offline Mode",
+                                                tint = GoldTheme,
+                                                modifier = Modifier.size(48.dp)
+                                            )
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                            Text(
+                                                text = "Offline Reading Panel ${index + 1}",
+                                                color = Color.White,
+                                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                                            )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                text = "Chapter: ${currentChapter.title}\nStory segment ${index + 1} has been pre-cached and secured offline successfully.",
+                                                color = Color.LightGray,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                textAlign = TextAlign.Center
+                                            )
+                                        }
                                     }
-                                }
-                            } else {
-                                var scale by remember(pageUrl) { mutableStateOf(1f) }
-                                var offset by remember(pageUrl) { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .wrapContentHeight()
-                                        .clip(androidx.compose.ui.graphics.RectangleShape)
-                                        .pointerInput(pageUrl) {
-                                            detectTransformGestures { _, pan, zoom, _ ->
-                                                scale = (scale * zoom).coerceIn(1f, 4f)
+                                } else {
+                                    var scale by remember(pageUrl) { mutableStateOf(1f) }
+                                    var offset by remember(pageUrl) { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .pointerInput(pageUrl, scale) {
                                                 if (scale > 1f) {
-                                                    offset = androidx.compose.ui.geometry.Offset(
-                                                        x = offset.x + pan.x,
-                                                        y = offset.y + pan.y
+                                                    detectTransformGestures { _, pan, zoom, _ ->
+                                                        scale = (scale * zoom).coerceIn(1f, 4f)
+                                                        if (scale > 1f) {
+                                                            offset = androidx.compose.ui.geometry.Offset(
+                                                                x = offset.x + pan.x,
+                                                                y = offset.y + pan.y
+                                                            )
+                                                        } else {
+                                                            offset = androidx.compose.ui.geometry.Offset.Zero
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            .pointerInput(pageUrl, imageSource) {
+                                                detectTapGestures(
+                                                    onTap = {
+                                                        zoomedPageSource = imageSource
+                                                    },
+                                                    onDoubleTap = {
+                                                        if (scale > 1f) {
+                                                            scale = 1f
+                                                            offset = androidx.compose.ui.geometry.Offset.Zero
+                                                        } else {
+                                                            scale = 2.5f
+                                                        }
+                                                    }
+                                                )
+                                            }
+                                            .graphicsLayer(
+                                                scaleX = scale,
+                                                scaleY = scale,
+                                                translationX = offset.x,
+                                                translationY = offset.y
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (isImageLoading) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(260.dp)
+                                                    .background(Color(0xFF13111E)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Column(
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    CircularProgressIndicator(
+                                                        color = GoldTheme,
+                                                        modifier = Modifier.size(28.dp),
+                                                        strokeWidth = 2.5.dp
                                                     )
-                                                } else {
-                                                    offset = androidx.compose.ui.geometry.Offset.Zero
+                                                    Text(
+                                                        text = "Loading Page ${index + 1}...",
+                                                        color = Color.Gray,
+                                                        fontSize = 11.sp
+                                                    )
                                                 }
                                             }
                                         }
-                                        .pointerInput(pageUrl) {
-                                            detectTapGestures(
-                                                onDoubleTap = {
-                                                    if (scale > 1f) {
-                                                        scale = 1f
-                                                        offset = androidx.compose.ui.geometry.Offset.Zero
-                                                    } else {
-                                                        scale = 2.5f
-                                                    }
+
+                                        AsyncImage(
+                                            model = imageSource,
+                                            contentDescription = "Comic Page ${index + 1}",
+                                            modifier = Modifier.fillMaxWidth(),
+                                            contentScale = ContentScale.FillWidth,
+                                            onSuccess = {
+                                                isImageLoading = false
+                                            },
+                                            onError = {
+                                                if (imageSource != fallbackUrl) {
+                                                    imageSource = fallbackUrl
+                                                } else if (imageSource != comic.imageUrl && comic.imageUrl.isNotBlank()) {
+                                                    imageSource = comic.imageUrl
+                                                } else {
+                                                    hasError = true
+                                                    isImageLoading = false
                                                 }
-                                            )
-                                        }
-                                        .graphicsLayer(
-                                            scaleX = scale,
-                                            scaleY = scale,
-                                            translationX = offset.x,
-                                            translationY = offset.y
+                                            }
                                         )
-                                ) {
-                                    AsyncImage(
-                                        model = pageUrl,
-                                        contentDescription = "Comic Page",
+                                    }
+                                }
+
+                                if (index >= 5 && (index + 1) % 10 == 0) {
+                                    com.example.data.ads.AdMobNativeAdView(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .wrapContentHeight(),
-                                        contentScale = ContentScale.FillWidth,
-                                        onError = { hasError = true }
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        adKey = "comic_page_${currentChapter.id}_${index}"
                                     )
                                 }
                             }
@@ -10172,12 +11510,39 @@ fun ComicReaderOverlay(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
+                            // Native Ad Card displayed when chapter finishes
+                            com.example.data.ads.AdMobNativeAdView(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 20.dp),
+                                adKey = "comic_chapter_finish_ad_${currentChapter.id}"
+                            )
+
                             Text(
                                 text = "You've finished this chapter!",
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(bottom = 16.dp)
                             )
+
+                            val navigateWithOfflineCheck: (ComicChapter) -> Unit = { targetChapter ->
+                                val isOnline = isNetworkConnected(context)
+                                val isDownloaded = isComicChapterDownloaded(context, comic, targetChapter, downloadsList)
+                                if (!isOnline && !isDownloaded) {
+                                    offlineDialogChapterTitle = "Chapter ${targetChapter.chapterNumber}: ${targetChapter.title}"
+                                    showOfflineDialog = true
+                                    Toast.makeText(context, "Check your connection, you are offline!", Toast.LENGTH_LONG).show()
+                                } else {
+                                    val readerActivity = context as? Activity
+                                    if (readerActivity != null) {
+                                        com.example.data.ads.AdManager.tryShowRewardedOrRewardedInterstitial(readerActivity, onComplete = {
+                                            onNavigateToChapter(targetChapter)
+                                        })
+                                    } else {
+                                        onNavigateToChapter(targetChapter)
+                                    }
+                                }
+                            }
 
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -10186,7 +11551,9 @@ fun ComicReaderOverlay(
                                 // Previous chapter button
                                 val prevChapter = allChapters.find { it.chapterNumber == currentChapter.chapterNumber - 1 }
                                 Button(
-                                    onClick = { prevChapter?.let { onNavigateToChapter(it) } },
+                                    onClick = {
+                                        prevChapter?.let { navigateWithOfflineCheck(it) }
+                                    },
                                     enabled = prevChapter != null,
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = CardBackground,
@@ -10200,7 +11567,9 @@ fun ComicReaderOverlay(
                                 // Next chapter button
                                 val nextChapter = allChapters.find { it.chapterNumber == currentChapter.chapterNumber + 1 }
                                 Button(
-                                    onClick = { nextChapter?.let { onNavigateToChapter(it) } },
+                                    onClick = {
+                                        nextChapter?.let { navigateWithOfflineCheck(it) }
+                                    },
                                     enabled = nextChapter != null,
                                     colors = ButtonDefaults.buttonColors(containerColor = RedPrimary),
                                     shape = RoundedCornerShape(8.dp)
@@ -10247,8 +11616,16 @@ fun ComicReaderOverlay(
                                             modifier = Modifier
                                                 .width(140.dp)
                                                 .clickable {
-                                                    onSelectComic(simComic)
-                                                    viewModel.addDebugLog("Navigation: Selected related comic '${simComic.title}'")
+                                                    val readerActivity = context as? Activity
+                                                    if (readerActivity != null) {
+                                                        com.example.data.ads.AdManager.tryShowRewardedOrRewardedInterstitial(readerActivity, onComplete = {
+                                                            onSelectComic(simComic)
+                                                            viewModel.addDebugLog("Navigation: Selected related comic '${simComic.title}'")
+                                                        })
+                                                    } else {
+                                                        onSelectComic(simComic)
+                                                        viewModel.addDebugLog("Navigation: Selected related comic '${simComic.title}'")
+                                                    }
                                                 },
                                             colors = CardDefaults.cardColors(containerColor = CardBackground),
                                             border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.1f))
@@ -10287,6 +11664,13 @@ fun ComicReaderOverlay(
                 }
             }
         }
+
+        zoomedPageSource?.let { source ->
+            ZoomableImageDialog(
+                imageSource = source,
+                onClose = { zoomedPageSource = null }
+            )
+        }
     }
 }
 
@@ -10297,6 +11681,7 @@ fun StoriesScreen(viewModel: com.example.ui.viewmodel.MPlayViewModel) {
     val currentPage by viewModel.currentStoryPage.collectAsStateWithLifecycle()
     val totalCount by viewModel.totalStoriesCount.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoadingStories.collectAsStateWithLifecycle()
+    val isSyncing by viewModel.isSyncingStoriesAndComics.collectAsStateWithLifecycle()
     val profileState by viewModel.profile.collectAsStateWithLifecycle()
     val isPremium = profileState?.isPremium == true
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -10304,6 +11689,12 @@ fun StoriesScreen(viewModel: com.example.ui.viewmodel.MPlayViewModel) {
     val selectedStoryDetail = viewModel.selectedStoryDetail
     val limit = 10
     val totalPages = remember(totalCount) { java.lang.Math.ceil(totalCount.toDouble() / limit.toDouble()).toInt() }
+
+    val storyListState = androidx.compose.foundation.lazy.rememberLazyListState()
+
+    LaunchedEffect(currentPage) {
+        storyListState.scrollToItem(0)
+    }
 
     var storySortOrder by remember { mutableStateOf("Latest First") }
     val sortedStories = remember(stories, storySortOrder) {
@@ -10316,7 +11707,19 @@ fun StoriesScreen(viewModel: com.example.ui.viewmodel.MPlayViewModel) {
     }
 
     LaunchedEffect(Unit) {
-        viewModel.loadStoriesForPage(0)
+        viewModel.ensureStoriesAndComicsSynced {
+            viewModel.loadStoriesForPage(0)
+        }
+    }
+
+    LaunchedEffect(isPremium) {
+        if (!isPremium) {
+            viewModel.restorePremiumSubscription { success, message ->
+                if (success) {
+                    Toast.makeText(context, "Device ID Verified! Premium status restored automatically.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     Box(
@@ -10410,6 +11813,51 @@ fun StoriesScreen(viewModel: com.example.ui.viewmodel.MPlayViewModel) {
                                 style = MaterialTheme.typography.bodyMedium.copy(color = GrayText),
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
                             )
+
+                            // Automatic Device ID Status Check Badge
+                            Surface(
+                                color = GoldTheme.copy(alpha = 0.12f),
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, GoldTheme.copy(alpha = 0.3f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.PhoneAndroid,
+                                            contentDescription = "Device ID Auto Check",
+                                            tint = GoldTheme,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            text = "Auto Device Check Active",
+                                            color = GoldTheme,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Text(
+                                        text = "Device ID: ${viewModel.getDeviceUniqueId()}",
+                                        color = Color.White.copy(alpha = 0.7f),
+                                        fontSize = 11.sp,
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                    )
+                                    Text(
+                                        text = "Retrieving device ID & Cloudflare premium status automatically. You don't need to do anything!",
+                                        color = GrayText,
+                                        fontSize = 11.sp,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                }
+                            }
+
                             Button(
                                 onClick = { viewModel.togglePremium() },
                                 colors = ButtonDefaults.buttonColors(containerColor = GoldTheme),
@@ -10508,7 +11956,16 @@ fun StoriesScreen(viewModel: com.example.ui.viewmodel.MPlayViewModel) {
                     }
                 }
 
-                if (stories.isEmpty()) {
+                if (isLoading || isSyncing) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .weight(1f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        MPlaySkeletonLoader()
+                    }
+                } else if (stories.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -10534,11 +11991,21 @@ fun StoriesScreen(viewModel: com.example.ui.viewmodel.MPlayViewModel) {
                 } else {
                     // Paged list of stories
                     LazyColumn(
+                        state = storyListState,
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+                        item {
+                            com.example.data.ads.AdMobNativeAdView(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 12.dp),
+                                adKey = "stories_top_native_ad_page_${currentPage}"
+                            )
+                        }
+
                         // RECENTLY READ STORIES
                         if (storyHistory.isNotEmpty()) {
                             item {
@@ -10699,8 +12166,17 @@ fun StoriesScreen(viewModel: com.example.ui.viewmodel.MPlayViewModel) {
                                         Spacer(modifier = Modifier.height(4.dp))
 
                                         // Details option
+                                        val storyItemActivity = androidx.compose.ui.platform.LocalContext.current as? Activity
                                         Button(
-                                            onClick = { viewModel.selectedStoryDetail = story },
+                                            onClick = {
+                                                if (storyItemActivity != null) {
+                                                    com.example.data.ads.AdManager.tryShowRewardedOrRewardedInterstitial(storyItemActivity, onComplete = {
+                                                        viewModel.selectedStoryDetail = story
+                                                    })
+                                                } else {
+                                                    viewModel.selectedStoryDetail = story
+                                                }
+                                            },
                                             colors = ButtonDefaults.buttonColors(containerColor = RedPrimary),
                                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                                             shape = RoundedCornerShape(6.dp),
@@ -10709,6 +12185,27 @@ fun StoriesScreen(viewModel: com.example.ui.viewmodel.MPlayViewModel) {
                                                 .testTag("story_details_btn_${story.id}")
                                         ) {
                                             Text("Read Details", style = MaterialTheme.typography.labelSmall.copy(color = Color.White, fontWeight = FontWeight.Bold))
+                                        }
+
+                                        Spacer(modifier = Modifier.width(6.dp))
+
+                                        Button(
+                                            onClick = {
+                                                viewModel.selectedStoryDetail = story
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = GoldTheme),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                            shape = RoundedCornerShape(6.dp),
+                                            modifier = Modifier.testTag("story_audio_btn_${story.id}")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.VolumeUp,
+                                                contentDescription = "Play Audio",
+                                                tint = Color.Black,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Play Audio", style = MaterialTheme.typography.labelSmall.copy(color = Color.Black, fontWeight = FontWeight.Bold))
                                         }
                                     }
                                 }
@@ -10985,10 +12482,10 @@ fun StoriesScreen(viewModel: com.example.ui.viewmodel.MPlayViewModel) {
                     .clickable(enabled = true, onClick = {}) // block clicks through
                     .testTag("story_detail_overlay")
             ) {
-                val scrollState = rememberScrollState()
+                val scrollState = remember(story.id, activeReadingPart?.id) { androidx.compose.foundation.ScrollState(0) }
                 
                 // Reset scroll position when switching parts or stories
-                LaunchedEffect(activeReadingPart, story.id) {
+                LaunchedEffect(activeReadingPart?.id, story.id) {
                     scrollState.scrollTo(0)
                 }
 
@@ -11152,6 +12649,14 @@ fun StoriesScreen(viewModel: com.example.ui.viewmodel.MPlayViewModel) {
 
                             Divider(color = Color.White.copy(alpha = 0.12f))
 
+                            // Native Ad in Story Reader
+                            com.example.data.ads.AdMobNativeAdView(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                adKey = "story_reader_top_${story.id}_${currentPart.id}"
+                            )
+
                             // Actual Part Narrative Content (Typography optimized for reading with highlighting and pinch-to-zoom)
                             Column(
                                 modifier = Modifier
@@ -11192,7 +12697,14 @@ fun StoriesScreen(viewModel: com.example.ui.viewmodel.MPlayViewModel) {
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(24.dp))
+                            com.example.data.ads.AdMobNativeAdView(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                adKey = "story_reader_bottom_${story.id}_${currentPart.id}"
+                            )
+
+                            Spacer(modifier = Modifier.height(12.dp))
                             Divider(color = Color.White.copy(alpha = 0.12f))
 
                             // End option 1: Navigate to other parts of the SAME story
@@ -11213,7 +12725,9 @@ fun StoriesScreen(viewModel: com.example.ui.viewmodel.MPlayViewModel) {
                                 ) {
                                     otherParts.forEach { otherPart ->
                                         Card(
-                                            onClick = { viewModel.activeReadingPart = otherPart },
+                                            onClick = {
+                                                viewModel.activeReadingPart = otherPart
+                                            },
                                             colors = CardDefaults.cardColors(containerColor = CardBackground),
                                             border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.15f)),
                                             modifier = Modifier.width(180.dp)
@@ -11300,6 +12814,13 @@ fun StoriesScreen(viewModel: com.example.ui.viewmodel.MPlayViewModel) {
                                 )
                             )
 
+                            com.example.data.ads.AdMobNativeAdView(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                adKey = "story_prologue_native_${story.id}"
+                            )
+
                             Spacer(modifier = Modifier.height(12.dp))
 
                             // Story Parts / Chapters List
@@ -11318,8 +12839,17 @@ fun StoriesScreen(viewModel: com.example.ui.viewmodel.MPlayViewModel) {
                             } else {
                                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     parts.forEach { part ->
+                                        val partActivity = androidx.compose.ui.platform.LocalContext.current as? Activity
                                         Card(
-                                            onClick = { viewModel.activeReadingPart = part },
+                                            onClick = {
+                                                if (partActivity != null) {
+                                                    com.example.data.ads.AdManager.tryShowRewardedOrRewardedInterstitial(partActivity, onComplete = {
+                                                        viewModel.activeReadingPart = part
+                                                    })
+                                                } else {
+                                                    viewModel.activeReadingPart = part
+                                                }
+                                            },
                                             colors = CardDefaults.cardColors(containerColor = CardBackground),
                                             border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.15f)),
                                             modifier = Modifier.fillMaxWidth()
@@ -11378,9 +12908,18 @@ fun StoriesScreen(viewModel: com.example.ui.viewmodel.MPlayViewModel) {
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 recommendedStories.forEach { recStory ->
+                                    val recStoryActivity = androidx.compose.ui.platform.LocalContext.current as? Activity
                                     Card(
                                         onClick = {
-                                            viewModel.selectedStoryDetail = recStory; viewModel.activeReadingPart = null
+                                            if (recStoryActivity != null) {
+                                                com.example.data.ads.AdManager.tryShowRewardedOrRewardedInterstitial(recStoryActivity, onComplete = {
+                                                    viewModel.selectedStoryDetail = recStory
+                                                    viewModel.activeReadingPart = null
+                                                })
+                                            } else {
+                                                viewModel.selectedStoryDetail = recStory
+                                                viewModel.activeReadingPart = null
+                                            }
                                         },
                                         colors = CardDefaults.cardColors(containerColor = CardBackground),
                                         border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.1f)),

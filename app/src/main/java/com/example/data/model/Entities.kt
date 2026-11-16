@@ -234,5 +234,74 @@ data class StoryHistory(
     val lastReadAt: Long = System.currentTimeMillis()
 )
 
+@Entity(
+    tableName = "batch_videos",
+    indices = [
+        Index(value = ["id"]),
+        Index(value = ["batchId"], unique = true),
+        Index(value = ["title"]),
+        Index(value = ["category"])
+    ]
+)
+@com.squareup.moshi.JsonClass(generateAdapter = true)
+data class BatchVideo(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val batchId: String = "",
+    val title: String = "",
+    val description: String = "",
+    val imageUrl: String = "",
+    val category: String = "Web Series",
+    val isPremium: Boolean = true,
+    val totalVideos: Int = 0,
+    val releaseDate: Long = System.currentTimeMillis()
+)
+
+@Entity(
+    tableName = "batch_video_items",
+    indices = [
+        Index(value = ["id"]),
+        Index(value = ["batchId"]),
+        Index(value = ["videoIndex"])
+    ]
+)
+@com.squareup.moshi.JsonClass(generateAdapter = true)
+data class BatchVideoItem(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val batchId: String = "",
+    val videoIndex: Int = 1,
+    val title: String = "",
+    val videoUrl: String = "",
+    val imageUrl: String = "",
+    val duration: String = "20 min",
+    val description: String = "",
+    val uploadTime: Long = System.currentTimeMillis(),
+    val durationSec: Int = 0,
+    val sizeMb: Double = 0.0
+)
+
+fun BatchVideoItem.toMediaItem(batch: BatchVideo? = null): MediaItem {
+    val bTitle = batch?.title ?: "Batch Series"
+    val bCat = batch?.category ?: "Web Series"
+    val bImg = if (imageUrl.isNotBlank()) imageUrl else (batch?.imageUrl ?: "")
+    val fullTitle = if (title.isNotBlank()) {
+        if (title.contains(bTitle, ignoreCase = true)) title else "$bTitle - $title"
+    } else {
+        "$bTitle - Episode $videoIndex"
+    }
+    val safeVideoUrl = com.example.util.VideoUrlSanitizer.sanitize(videoUrl)
+    return MediaItem(
+        id = if (id > 0) 100000 + id else 100000 + (videoUrl.hashCode() and 0x7FFFFFFF % 900000),
+        title = fullTitle,
+        description = if (description.isNotBlank()) description else (batch?.description ?: "Episode $videoIndex of $bTitle"),
+        imageUrl = bImg,
+        category = bCat,
+        isPremium = true,
+        reelsUrl = safeVideoUrl,
+        rating = 4.8f,
+        likesCount = "${videoIndex * 150 + 600} likes"
+    )
+}
+
+
 
 

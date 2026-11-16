@@ -1,10 +1,7 @@
 package com.example.data.network
 
 import android.content.Context
-import com.example.data.model.Channel
-import com.example.data.model.MediaItem
-import com.example.data.model.UserReel
-import com.example.data.model.UserNotification
+import com.example.data.model.*
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -107,6 +104,16 @@ interface FirebaseApi {
         @Path("projectId") projectId: String
     ): FirestoreDocumentListResponse?
 
+    @GET("v1/projects/{projectId}/databases/(default)/documents/ad_config")
+    suspend fun getAdConfig(
+        @Path("projectId") projectId: String
+    ): FirestoreDocumentListResponse?
+
+    @GET("v1/projects/{projectId}/databases/(default)/documents/ad_conditions")
+    suspend fun getAdConditions(
+        @Path("projectId") projectId: String
+    ): FirestoreDocumentListResponse?
+
     @GET("v1/projects/{projectId}/databases/(default)/documents/notifications")
     suspend fun getNotifications(
         @Path("projectId") projectId: String
@@ -114,6 +121,16 @@ interface FirebaseApi {
 
     @GET("v1/projects/{projectId}/databases/(default)/documents/audio_batches")
     suspend fun getAudioBatches(
+        @Path("projectId") projectId: String
+    ): FirestoreDocumentListResponse?
+
+    @GET("v1/projects/{projectId}/databases/(default)/documents/batchvideo")
+    suspend fun getBatchVideoCollection(
+        @Path("projectId") projectId: String
+    ): FirestoreDocumentListResponse?
+
+    @GET("v1/projects/{projectId}/databases/(default)/documents/batch_video")
+    suspend fun getBatchVideoAltCollection(
         @Path("projectId") projectId: String
     ): FirestoreDocumentListResponse?
 
@@ -271,7 +288,16 @@ class FirebaseService(val context: Context) {
             ?: fields["rating"]?.integerValue?.toFloat()
             ?: fields["rating"]?.stringValue?.toFloatOrNull()
             ?: 4.5f
-        val reelsUrl = fields["reelsUrl"]?.stringValue ?: ""
+        val reelsUrl = fields["reelsUrl"]?.stringValue
+            ?: fields["reelsurl"]?.stringValue
+            ?: fields["cloudflareurl"]?.stringValue
+            ?: fields["cloudflareUrl"]?.stringValue
+            ?: fields["videourl"]?.stringValue
+            ?: fields["videoUrl"]?.stringValue
+            ?: fields["streamUrl"]?.stringValue
+            ?: fields["stream_url"]?.stringValue
+            ?: fields["url"]?.stringValue
+            ?: ""
         val likesCount = fields["likesCount"]?.stringValue ?: "1.2k"
 
         return MediaItem(
@@ -311,6 +337,8 @@ class FirebaseService(val context: Context) {
             "isPremium" to FirestoreValue(booleanValue = item.isPremium),
             "rating" to FirestoreValue(doubleValue = item.rating.toDouble()),
             "reelsUrl" to FirestoreValue(stringValue = item.reelsUrl),
+            "cloudflareurl" to FirestoreValue(stringValue = item.reelsUrl),
+            "videoUrl" to FirestoreValue(stringValue = item.reelsUrl),
             "likesCount" to FirestoreValue(stringValue = item.likesCount)
         )
         return FirestoreDocumentDetail(
@@ -431,13 +459,77 @@ class FirebaseService(val context: Context) {
         val category = com.example.data.model.Category(id = id, name = name, isPortrait = isPortrait, type = type)
 
         val videosJson = fields["videosJson"]?.stringValue ?: "[]"
-        val videos = try {
-            mediaListAdapter.fromJson(videosJson) ?: emptyList()
+        val videosList = mutableListOf<MediaItem>()
+
+        try {
+            val jsonArray = org.json.JSONArray(videosJson)
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.optJSONObject(i) ?: continue
+
+                val title = when {
+                    obj.has("title") && !obj.isNull("title") && obj.optString("title").isNotBlank() -> obj.optString("title")
+                    obj.has("name") && !obj.isNull("name") && obj.optString("name").isNotBlank() -> obj.optString("name")
+                    else -> "Untitled Video"
+                }
+
+                val imageUrl = when {
+                    obj.has("imageUrl") && !obj.isNull("imageUrl") && obj.optString("imageUrl").isNotBlank() -> obj.optString("imageUrl")
+                    obj.has("thumburl") && !obj.isNull("thumburl") && obj.optString("thumburl").isNotBlank() -> obj.optString("thumburl")
+                    obj.has("url") && !obj.isNull("url") && obj.optString("url").isNotBlank() -> obj.optString("url")
+                    else -> "https://images.unsplash.com/photo-1578632767115-351597cf2477?auto=format&fit=crop&w=600&q=80"
+                }
+
+                val reelsUrl = when {
+                    obj.has("reelsUrl") && !obj.isNull("reelsUrl") && obj.optString("reelsUrl").isNotBlank() -> obj.optString("reelsUrl")
+                    obj.has("cloudflareurl") && !obj.isNull("cloudflareurl") && obj.optString("cloudflareurl").isNotBlank() -> obj.optString("cloudflareurl")
+                    obj.has("videourl") && !obj.isNull("videourl") && obj.optString("videourl").isNotBlank() -> obj.optString("videourl")
+                    obj.has("url") && !obj.isNull("url") && obj.optString("url").isNotBlank() -> obj.optString("url")
+                    else -> ""
+                }
+
+                val description = when {
+                    obj.has("description") && !obj.isNull("description") && obj.optString("description").isNotBlank() -> obj.optString("description")
+                    else -> "Watch $title in HD on MPlay."
+                }
+
+                val rawCategory = if (obj.has("category") && !obj.isNull("category")) obj.optString("category") else ""
+                val cleanCategory = if (rawCategory.isBlank() || rawCategory.equals("None", ignoreCase = true) || rawCategory.equals("null", ignoreCase = true)) {
+                    name
+                } else if (!rawCategory.split(",").map { it.trim().lowercase() }.contains(name.trim().lowercase())) {
+                    "$rawCategory, $name"
+                } else {
+                    rawCategory
+                }
+
+                val rawId = obj.optInt("id", 0)
+                // Order convention: top of category JSON array (i = 0) is older, bottom (i = N - 1) is latest.
+                // Each newly appended video at the bottom receives a higher ID so it appears first under Latest (NEW) sort.
+                val catIndexSafe = if (id > 0) id else 1
+                val finalId = ((catIndexSafe % 2000) * 1_000_000) + (i + 1)
+
+                val isPremium = obj.optBoolean("isPremium", false)
+                val rating = obj.optDouble("rating", 4.5).toFloat()
+                val likesCount = if (obj.has("likesCount") && !obj.isNull("likesCount")) obj.optString("likesCount") else "1.2k"
+
+                videosList.add(
+                    MediaItem(
+                        id = finalId,
+                        title = title,
+                        description = description,
+                        imageUrl = imageUrl,
+                        category = cleanCategory,
+                        isPremium = isPremium,
+                        rating = rating,
+                        reelsUrl = reelsUrl,
+                        likesCount = likesCount
+                    )
+                )
+            }
         } catch (e: Exception) {
-            emptyList()
+            e.printStackTrace()
         }
 
-        return Pair(category, videos)
+        return Pair(category, videosList)
     }
 
     private fun buildFirestoreStoryDoc(
@@ -598,13 +690,59 @@ class FirebaseService(val context: Context) {
         }
     }
 
+    private fun mergeCategoriesByName(rawList: List<Pair<com.example.data.model.Category, List<MediaItem>>>): List<Pair<com.example.data.model.Category, List<MediaItem>>> {
+        val map = LinkedHashMap<String, Pair<com.example.data.model.Category, MutableList<MediaItem>>>()
+        for ((cat, videos) in rawList) {
+            val key = cat.name.trim().lowercase()
+            if (!map.containsKey(key)) {
+                map[key] = Pair(cat, videos.toMutableList())
+            } else {
+                val existing = map[key]!!
+                existing.second.addAll(videos)
+            }
+        }
+        return map.values.map { Pair(it.first, it.second) }
+    }
+
+data class RawFirestoreCategory(
+    val id: Int,
+    val name: String,
+    val isPortrait: Boolean,
+    val type: String,
+    val videosJson: String
+)
+
+    suspend fun fetchRawVideoCategoriesFromFirestore(): List<RawFirestoreCategory>? {
+        clearLastError()
+        val api = getApi() ?: return null
+        val projectId = getFirebaseUrl()
+        return try {
+            val response = api.getVideoCategories(projectId)
+            response?.documents?.mapNotNull { doc ->
+                val fields = doc.fields ?: return@mapNotNull null
+                val id = fields["id"]?.integerValue?.toIntOrNull() 
+                    ?: fields["id"]?.stringValue?.toIntOrNull() 
+                    ?: 0
+                val name = fields["name"]?.stringValue ?: ""
+                val isPortrait = fields["isPortrait"]?.booleanValue ?: true
+                val type = fields["type"]?.stringValue ?: "video"
+                val videosJson = fields["videosJson"]?.stringValue ?: "[]"
+                RawFirestoreCategory(id = id, name = name, isPortrait = isPortrait, type = type, videosJson = videosJson)
+            }
+        } catch (e: Exception) {
+            handleError(e)
+            null
+        }
+    }
+
     suspend fun fetchVideoCategories(): List<Pair<com.example.data.model.Category, List<MediaItem>>>? {
         clearLastError()
         val api = getApi() ?: return null
         val projectId = getFirebaseUrl()
         return try {
             val response = api.getVideoCategories(projectId)
-            response?.documents?.mapNotNull { mapToCategoryWithVideos(it, defaultType = "video") } ?: emptyList()
+            val rawList = response?.documents?.mapNotNull { mapToCategoryWithVideos(it, defaultType = "video") } ?: emptyList()
+            mergeCategoriesByName(rawList)
         } catch (e: Exception) {
             handleError(e)
             null
@@ -732,6 +870,170 @@ class FirebaseService(val context: Context) {
         }
     }
 
+    suspend fun fetchBatchVideosFromFirestore(): List<Pair<BatchVideo, List<BatchVideoItem>>>? {
+        clearLastError()
+        val api = getApi() ?: return null
+        val projectId = getFirebaseUrl()
+        return try {
+            var response = api.getBatchVideoCollection(projectId)
+            if (response == null || response.documents.isNullOrEmpty()) {
+                response = api.getBatchVideoAltCollection(projectId)
+            }
+            val result = mutableListOf<Pair<BatchVideo, List<BatchVideoItem>>>()
+            response?.documents?.forEachIndexed { index, doc ->
+                val fields = doc.fields ?: return@forEachIndexed
+                val docName = doc.name?.substringAfterLast("/") ?: "batch_${index + 1}"
+                val bId = fields["batchId"]?.stringValue ?: fields["id"]?.stringValue ?: docName
+                val bTitle = fields["title"]?.stringValue ?: fields["name"]?.stringValue ?: fields["batchName"]?.stringValue ?: "Batch Series ${index + 1}"
+                val bDesc = fields["description"]?.stringValue ?: fields["content"]?.stringValue ?: "Complete web series with all episodes in high definition."
+                val bImg = fields["imageUrl"]?.stringValue ?: fields["thumbnailUrl"]?.stringValue ?: fields["posterUrl"]?.stringValue ?: ""
+                val bCat = fields["category"]?.stringValue ?: "Web Series"
+                val bPrem = fields["isPremium"]?.booleanValue ?: true
+                val bRel = fields["releaseDate"]?.integerValue?.toLongOrNull() ?: fields["createdAt"]?.integerValue?.toLongOrNull() ?: System.currentTimeMillis()
+
+                val itemsList = mutableListOf<BatchVideoItem>()
+                val videosJson = fields["videosJson"]?.stringValue ?: fields["urlsJson"]?.stringValue ?: ""
+                if (videosJson.isNotBlank()) {
+                    try {
+                        val arr = org.json.JSONArray(videosJson)
+                        for (vIdx in 0 until arr.length()) {
+                            val vObj = arr.optJSONObject(vIdx)
+                            if (vObj != null) {
+                                val vTitle = vObj.optString("title", vObj.optString("name", "Episode ${vIdx + 1}")).ifBlank { "Episode ${vIdx + 1}" }
+                                val vUrl = vObj.optString("videoUrl", vObj.optString("url", vObj.optString("streamUrl", vObj.optString("mp4Url", ""))))
+                                val vImg = vObj.optString("imageUrl", vObj.optString("thumbnailUrl", bImg)).ifBlank { bImg }
+                                val vDur = vObj.optString("duration", vObj.optString("length", "22 min")).ifBlank { "22 min" }
+                                val vDesc = vObj.optString("description", "Episode ${vIdx + 1} of $bTitle")
+                                if (vUrl.isNotBlank()) {
+                                    itemsList.add(
+                                        BatchVideoItem(
+                                            batchId = bId,
+                                            videoIndex = vIdx + 1,
+                                            title = vTitle,
+                                            videoUrl = vUrl,
+                                            imageUrl = vImg,
+                                            duration = vDur,
+                                            description = vDesc
+                                        )
+                                    )
+                                }
+                            } else {
+                                val urlStr = arr.optString(vIdx, "").trim()
+                                if (urlStr.isNotBlank()) {
+                                    itemsList.add(
+                                        BatchVideoItem(
+                                            batchId = bId,
+                                            videoIndex = vIdx + 1,
+                                            title = "Episode ${vIdx + 1}",
+                                            videoUrl = urlStr,
+                                            imageUrl = bImg,
+                                            duration = "22 min",
+                                            description = "Episode ${vIdx + 1} of $bTitle"
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+
+                // Check comma / newline separated URLs in string field
+                val rawUrls = fields["batchVideoUrls"]?.stringValue ?: fields["urls"]?.stringValue ?: ""
+                if (itemsList.isEmpty() && rawUrls.isNotBlank() && (rawUrls.contains("http://") || rawUrls.contains("https://"))) {
+                    val lines = rawUrls.split("\n", ",").map { it.trim() }.filter { it.startsWith("http") }
+                    lines.forEachIndexed { vIdx, u ->
+                        itemsList.add(
+                            BatchVideoItem(
+                                batchId = bId,
+                                videoIndex = vIdx + 1,
+                                title = "Episode ${vIdx + 1}",
+                                videoUrl = u,
+                                imageUrl = bImg,
+                                duration = "22 min",
+                                description = "Episode ${vIdx + 1} of $bTitle"
+                            )
+                        )
+                    }
+                }
+
+                val batch = BatchVideo(
+                    batchId = bId,
+                    title = bTitle,
+                    description = bDesc,
+                    imageUrl = bImg,
+                    category = bCat,
+                    isPremium = bPrem,
+                    totalVideos = itemsList.size,
+                    releaseDate = bRel
+                )
+
+                result.add(batch to itemsList)
+            }
+            result
+        } catch (e: Exception) {
+            handleError(e)
+            null
+        }
+    }
+
+    suspend fun uploadBatchVideosToFirestore(batches: List<Pair<BatchVideo, List<BatchVideoItem>>>): Boolean {
+        clearLastError()
+        val api = getApi() ?: return false
+        val projectId = getFirebaseUrl()
+        if (batches.isEmpty()) return true
+        return try {
+            val writes = batches.map { (batch, items) ->
+                val docId = batch.batchId.ifBlank { "batch_${batch.id}" }
+                val videosJson = try {
+                    val arr = org.json.JSONArray()
+                    items.forEach { item ->
+                        arr.put(
+                            org.json.JSONObject().apply {
+                                put("id", item.id)
+                                put("videoIndex", item.videoIndex)
+                                put("title", item.title)
+                                put("videoUrl", item.videoUrl)
+                                put("imageUrl", item.imageUrl)
+                                put("duration", item.duration)
+                                put("description", item.description)
+                            }
+                        )
+                    }
+                    arr.toString()
+                } catch (e: Exception) {
+                    "[]"
+                }
+
+                val fields = mapOf(
+                    "batchId" to FirestoreValue(stringValue = docId),
+                    "title" to FirestoreValue(stringValue = batch.title),
+                    "name" to FirestoreValue(stringValue = batch.title),
+                    "description" to FirestoreValue(stringValue = batch.description),
+                    "imageUrl" to FirestoreValue(stringValue = batch.imageUrl),
+                    "category" to FirestoreValue(stringValue = batch.category),
+                    "isPremium" to FirestoreValue(booleanValue = batch.isPremium),
+                    "totalVideos" to FirestoreValue(integerValue = items.size.toString()),
+                    "videosJson" to FirestoreValue(stringValue = videosJson),
+                    "releaseDate" to FirestoreValue(integerValue = batch.releaseDate.toString())
+                )
+
+                FirestoreWrite(
+                    update = FirestoreDocumentDetail(
+                        name = "projects/$projectId/databases/(default)/documents/batchvideo/$docId",
+                        fields = fields
+                    )
+                )
+            }
+            api.commit(projectId, FirestoreCommitRequest(writes))
+            true
+        } catch (e: Exception) {
+            handleError(e)
+            false
+        }
+    }
+
     // --- Service API Implementations ---
 
     suspend fun fetchChannels(): List<Channel>? {
@@ -803,7 +1105,14 @@ class FirebaseService(val context: Context) {
         val description = fields["description"]?.stringValue ?: ""
         val imageUrl = fields["imageUrl"]?.stringValue ?: ""
         val videoUrl = fields["videoUrl"]?.stringValue 
+            ?: fields["videourl"]?.stringValue
+            ?: fields["cloudflareurl"]?.stringValue
+            ?: fields["cloudflareUrl"]?.stringValue
             ?: fields["reelsUrl"]?.stringValue 
+            ?: fields["reelsurl"]?.stringValue
+            ?: fields["streamUrl"]?.stringValue
+            ?: fields["stream_url"]?.stringValue
+            ?: fields["url"]?.stringValue
             ?: ""
         val likesCount = fields["likesCount"]?.stringValue ?: "1.2k"
         val isLiked = fields["isLiked"]?.booleanValue ?: false
@@ -1236,6 +1545,76 @@ class FirebaseService(val context: Context) {
             val write = FirestoreWrite(update = buildFirestoreBroadcastDoc(projectId, b))
             api.commit(projectId, FirestoreCommitRequest(listOf(write)))
             true
+        } catch (e: Exception) {
+            handleError(e)
+            false
+        }
+    }
+
+    private fun buildAdConditionsDoc(projectId: String, collectionName: String, docId: String): FirestoreDocumentDetail {
+        val fields = mapOf(
+            "publisher_id" to FirestoreValue(stringValue = "ca-app-pub-4168400468940239"),
+            "banner_id" to FirestoreValue(stringValue = com.example.data.ads.AdManager.bannerAdId),
+            "interstitial_id" to FirestoreValue(stringValue = com.example.data.ads.AdManager.interstitialAdId),
+            "rewarded_id" to FirestoreValue(stringValue = com.example.data.ads.AdManager.rewardedAdId),
+            "rewarded_interstitial_id" to FirestoreValue(stringValue = com.example.data.ads.AdManager.rewardedInterstitialAdId),
+            "app_open_id" to FirestoreValue(stringValue = com.example.data.ads.AdManager.appOpenAdId),
+            "native_id" to FirestoreValue(stringValue = com.example.data.ads.AdManager.nativeAdId),
+            "capping_interval_ms" to FirestoreValue(integerValue = "180000"),
+            "uncapped_impression_limit" to FirestoreValue(integerValue = "5"),
+            "is_ads_enabled" to FirestoreValue(booleanValue = true),
+            "updatedAt" to FirestoreValue(stringValue = System.currentTimeMillis().toString())
+        )
+        return FirestoreDocumentDetail(
+            name = "projects/$projectId/databases/(default)/documents/$collectionName/$docId",
+            fields = fields
+        )
+    }
+
+    suspend fun uploadAdConditionsToFirebase(): Boolean {
+        clearLastError()
+        val api = getApi() ?: return false
+        val projectId = getFirebaseUrl()
+        return try {
+            val writeConfig = FirestoreWrite(update = buildAdConditionsDoc(projectId, "ad_config", "default_config"))
+            val writeConditions = FirestoreWrite(update = buildAdConditionsDoc(projectId, "ad_conditions", "default_conditions"))
+            api.commit(projectId, FirestoreCommitRequest(listOf(writeConfig, writeConditions)))
+            android.util.Log.d("FirebaseService", "ad_config and ad_conditions seeded to Firestore successfully!")
+            true
+        } catch (e: Exception) {
+            handleError(e)
+            false
+        }
+    }
+
+    suspend fun syncAdConfigFromFirebase(): Boolean {
+        clearLastError()
+        val api = getApi() ?: return false
+        val projectId = getFirebaseUrl()
+        return try {
+            var doc = api.getAdConditions(projectId)?.documents?.firstOrNull()
+            if (doc == null || doc.fields.isNullOrEmpty()) {
+                doc = api.getAdConfig(projectId)?.documents?.firstOrNull()
+            }
+
+            if (doc == null || doc.fields.isNullOrEmpty()) {
+                uploadAdConditionsToFirebase()
+                return true
+            }
+
+            if (doc.fields != null) {
+                val fields = doc.fields
+                fields["banner_id"]?.stringValue?.let { if (it.isNotBlank()) com.example.data.ads.AdManager.bannerAdId = it }
+                fields["interstitial_id"]?.stringValue?.let { if (it.isNotBlank()) com.example.data.ads.AdManager.interstitialAdId = it }
+                fields["rewarded_id"]?.stringValue?.let { if (it.isNotBlank()) com.example.data.ads.AdManager.rewardedAdId = it }
+                fields["rewarded_interstitial_id"]?.stringValue?.let { if (it.isNotBlank()) com.example.data.ads.AdManager.rewardedInterstitialAdId = it }
+                fields["app_open_id"]?.stringValue?.let { if (it.isNotBlank()) com.example.data.ads.AdManager.appOpenAdId = it }
+                fields["native_id"]?.stringValue?.let { if (it.isNotBlank()) com.example.data.ads.AdManager.nativeAdId = it }
+                android.util.Log.d("FirebaseService", "Admob Config & Conditions dynamically synced from Firestore!")
+                true
+            } else {
+                false
+            }
         } catch (e: Exception) {
             handleError(e)
             false

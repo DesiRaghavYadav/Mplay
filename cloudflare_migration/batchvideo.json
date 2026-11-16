@@ -1,0 +1,63 @@
+[
+  {
+    "id": "arkestra_dance_batch_01",
+    "batchId": "arkestra_dance_batch_01",
+    "title": "Arkestra dance",
+    "name": "Arkestra dance",
+    "category": "Stage Dance",
+    "description": "Exclusive live stage Arkestra dance performances and high-energy musical events.",
+    "imageUrl": "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&q=80",
+    "isPremium": 1,
+    "totalVideos": 6,
+    "videos": [
+      {
+        "videoIndex": 1,
+        "title": "Arkestra Dance Performance Part 1",
+        "videoUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+        "imageUrl": "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&q=80",
+        "duration": "0:30",
+        "description": "5.3 MB"
+      },
+      {
+        "videoIndex": 2,
+        "title": "Arkestra Dance Stage Show Part 2",
+        "videoUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+        "imageUrl": "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?auto=format&fit=crop&w=600&q=80",
+        "duration": "0:26",
+        "description": "3.9 MB"
+      },
+      {
+        "videoIndex": 3,
+        "title": "Arkestra Folk Dance Episode 3",
+        "videoUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+        "imageUrl": "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=600&q=80",
+        "duration": "1:41",
+        "description": "6.3 MB"
+      },
+      {
+        "videoIndex": 4,
+        "title": "Arkestra Live Stage Drama Part 4",
+        "videoUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+        "imageUrl": "https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=600&q=80",
+        "duration": "0:23",
+        "description": "2.2 MB"
+      },
+      {
+        "videoIndex": 5,
+        "title": "Night Stage Celebration Dance",
+        "videoUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4",
+        "imageUrl": "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=600&q=80",
+        "duration": "0:30",
+        "description": "2.4 MB"
+      },
+      {
+        "videoIndex": 6,
+        "title": "Arkestra Superhit Finale",
+        "videoUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4",
+        "imageUrl": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80",
+        "duration": "0:14",
+        "description": "1.1 MB"
+      }
+    ]
+  }
+]

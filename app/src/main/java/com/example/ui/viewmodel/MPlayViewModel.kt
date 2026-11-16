@@ -13,13 +13,13 @@ import kotlinx.coroutines.launch
 enum class AppTab(val label: String) {
     HOME("Home"),
     EXPLORE("Explore"),
+    BATCH_VIDEO("Batch Video"),
     COMICS("Comics"),
     STORIES("Stories"),
     REELS("Reels"),
     DOWNLOAD("Download"),
     PROFILE("Profile"),
-    SUPPORT("Support"),
-    ADMIN("Admin Tools")
+    SUPPORT("Support")
 }
 
 class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
@@ -46,8 +46,16 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
     fun triggerRefresh() {
         viewModelScope.launch {
             _isLoading.value = true
-            kotlinx.coroutines.delay(1200) // Beautiful 1.2s OTT database/network simulation delay
-            _isLoading.value = false
+            try {
+                repository.syncCategoriesWithFirebase()
+                repository.syncDataWithFirebase()
+                repository.syncStoriesAndComicsWithFirebase()
+                repository.refreshAndShuffleReelsLocal()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _isLoading.value = false
+            }
         }
     }
 
@@ -243,15 +251,18 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
         viewModelScope.launch {
             val list = repository.allUserReels.first()
             val item = list.find { it.id == id } ?: return@launch
+            val rawStr = item.likesCount.replace("k", "").replace("K", "").trim()
+            val num = rawStr.toDoubleOrNull() ?: 80.0
+            val updatedLikes = if (item.isLiked) {
+                val newNum = (num - 0.1).coerceAtLeast(0.0)
+                if (newNum % 1.0 == 0.0) "${newNum.toInt()}k" else "${String.format(java.util.Locale.US, "%.1f", newNum)}k"
+            } else {
+                val newNum = num + 0.1
+                "${String.format(java.util.Locale.US, "%.1f", newNum)}k"
+            }
             val updated = item.copy(
                 isLiked = !item.isLiked,
-                likesCount = if (item.isLiked) {
-                    val num = item.likesCount.replace("k", "").toDoubleOrNull() ?: 1.2
-                    "${String.format("%.1f", (num - 0.1).coerceAtLeast(0.0))}k"
-                } else {
-                    val num = item.likesCount.replace("k", "").toDoubleOrNull() ?: 1.2
-                    "${String.format("%.1f", num + 0.1)}k"
-                }
+                likesCount = updatedLikes
             )
             repository.insertUserReels(listOf(updated))
         }
@@ -285,10 +296,7 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
     val notificationAnalytics: StateFlow<List<NotificationAnalyticsMetric>> = repository.allNotificationAnalytics
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // --- Admin Broadcast / FCM Panel State ---
-    private val _isAdminModeEnabled = MutableStateFlow(false)
-    val isAdminModeEnabled: StateFlow<Boolean> = _isAdminModeEnabled.asStateFlow()
-
+    // --- Broadcast / FCM Panel State ---
     private val _broadcastHistory = MutableStateFlow<List<com.example.data.model.BroadcastNotification>>(emptyList())
     val broadcastHistory: StateFlow<List<com.example.data.model.BroadcastNotification>> = _broadcastHistory.asStateFlow()
 
@@ -298,25 +306,7 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
     private val _allUsersList = MutableStateFlow<List<Map<String, String>>>(emptyList())
     val allUsersList: StateFlow<List<Map<String, String>>> = _allUsersList.asStateFlow()
 
-    init {
-        // Load admin mode preference
-        repository.context?.let { ctx ->
-            val prefs = ctx.getSharedPreferences("app_user_prefs", android.content.Context.MODE_PRIVATE)
-            _isAdminModeEnabled.value = prefs.getBoolean("admin_mode_enabled", false)
-        }
-        fetchFcmToken()
-        refreshFcmHistoryAndUsers()
-    }
-
-    fun toggleAdminMode() {
-        val newValue = !_isAdminModeEnabled.value
-        _isAdminModeEnabled.value = newValue
-        repository.context?.let { ctx ->
-            val prefs = ctx.getSharedPreferences("app_user_prefs", android.content.Context.MODE_PRIVATE)
-            prefs.edit().putBoolean("admin_mode_enabled", newValue).apply()
-        }
-        addDebugLog("Admin/Developer Mode is now ${if (newValue) "ENABLED" else "DISABLED"}")
-    }
+    // Consolidated into single startup init block below to avoid duplicate Cloudflare requests
 
     fun refreshFcmHistoryAndUsers() {
         viewModelScope.launch {
@@ -438,15 +428,6 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
                         val prefs = context.getSharedPreferences("app_user_prefs", android.content.Context.MODE_PRIVATE)
                         prefs.edit().putString("fcm_token", token).apply()
                     }
-
-                    // Trigger sync so that this token and userId are linked in Firestore
-                    viewModelScope.launch {
-                        try {
-                            repository.syncUserUniqueIdAndPremiumStatus()
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
-                    }
                 }
         } catch (e: Exception) {
             val fallback = "fcm_mock_device_token_" + java.util.UUID.randomUUID().toString().take(8)
@@ -458,15 +439,6 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
             if (context != null) {
                 val prefs = context.getSharedPreferences("app_user_prefs", android.content.Context.MODE_PRIVATE)
                 prefs.edit().putString("fcm_token", fallback).apply()
-            }
-            
-            // Trigger sync for mock token too
-            viewModelScope.launch {
-                try {
-                    repository.syncUserUniqueIdAndPremiumStatus()
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
             }
         }
     }
@@ -587,56 +559,78 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
     init {
         // Load initial custom Firebase URL if configured
         _firebaseUrl.value = repository.firebaseService?.getFirebaseUrl() ?: ""
-        
-        // Single unified sequential setup and sync sequence
+        fetchFcmToken()
+
+        // Single coordinated startup sync: fetches live Cloudflare data + user status once in parallel
         viewModelScope.launch {
             _isLoading.value = true
             _isStatusChecked.value = false
-            
-            // 1. Force retrieval and synchronization of unique ID & Premium status from Cloud Firestore
+
             try {
-                repository.syncUserUniqueIdAndPremiumStatus()
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-            
-            // 2. Pre-populate database with aesthetic design elements if empty
-            repository.prepopulateDatabase()
-            
-            // Sync locally-saved pending likes to Cloud Database to minimize write operations
-            try {
-                repository.syncPendingLocalLikesToCloud()
+                repository.prepopulateDatabase()
             } catch (e: Exception) {
                 e.printStackTrace()
             }
 
-            // Shuffle and load the day's selected 3 batches of reels locally on app opened
-            try {
-                repository.refreshAndShuffleReelsLocal()
-            } catch (e: Exception) {
-                e.printStackTrace()
+            // Run live Cloudflare content sync (7 endpoints), user status check, and notifications in parallel once
+            val syncJob = launch {
+                try {
+                    repository.syncDataWithCloudflare(forceRefresh = true)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
             }
-            
-            // Auto-load stories now that database is guaranteed to be seeded
+
+            val userSyncJob = launch {
+                try {
+                    repository.syncUserUniqueIdAndPremiumStatus()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+
+            val notifJob = launch {
+                try {
+                    fetchNewNotifications()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+
+            // Wait for fresh live Cloudflare data & user status before unlocking UI (no stale local data)
+            userSyncJob.join()
+            syncJob.join()
             loadStoriesForPage(0)
-            
-            // 3. Complete system diagnostic validations
-            checkAppVersion()
-            fetchNewNotifications()
-            
-            // 4. Aesthetic minimal delay to let layout elements settle
-            kotlinx.coroutines.delay(1000)
-            
             _isStatusChecked.value = true
             _isLoading.value = false
-            
-            // 5. Connect and listen to live stream updates to sync profile status changes
+
+            // Ensure tab reflects final verified premium status after startup check completes
+            val verifiedPremium = repository.profileState.first()?.isPremium == true || repository.isUserConfirmedPremiumLocally()
+            if (!verifiedPremium && (_currentTab.value == AppTab.HOME || _currentTab.value == AppTab.EXPLORE || _currentTab.value == AppTab.BATCH_VIDEO || _currentTab.value == AppTab.COMICS || _currentTab.value == AppTab.STORIES)) {
+                _currentTab.value = AppTab.REELS
+            }
+
+            // Non-blocking secondary startup checks
+            launch {
+                try {
+                    notifJob.join()
+                    checkAppVersion()
+                    repository.syncPendingLocalLikesToCloud()
+                    repository.refreshAndShuffleReelsLocal()
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+
+        // Connect and listen to live stream updates to sync profile status changes
+        viewModelScope.launch {
             profile.filterNotNull().collectLatest { prof ->
                 _profileNameInput.value = prof.name
                 _profilePhoneInput.value = prof.phone
 
-                // If user is not premium and they are on a premium tab, switch to Reels instantly
-                if (!prof.isPremium && (_currentTab.value == AppTab.HOME || _currentTab.value == AppTab.EXPLORE)) {
+                // If user is not premium after status check completes and they are on a premium tab, switch to Reels instantly
+                if (_isStatusChecked.value && !prof.isPremium && (_currentTab.value == AppTab.HOME || _currentTab.value == AppTab.EXPLORE || _currentTab.value == AppTab.BATCH_VIDEO || _currentTab.value == AppTab.COMICS || _currentTab.value == AppTab.STORIES)) {
                     _currentTab.value = AppTab.REELS
                 }
             }
@@ -762,6 +756,27 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
         }
     }
 
+    // Explicitly restore premium subscription status based on unique device ANDROID_ID
+    fun getDeviceUniqueId(): String {
+        return repository.getOrCreateUserUniqueId()
+    }
+
+    fun restorePremiumSubscription(onResult: ((Boolean, String) -> Unit)? = null) {
+        viewModelScope.launch {
+            try {
+                val restored = repository.restorePremiumStatusByDeviceId()
+                val deviceId = repository.getOrCreateUserUniqueId()
+                if (restored) {
+                    onResult?.invoke(true, "Premium subscription restored for device: $deviceId")
+                } else {
+                    onResult?.invoke(false, "No active premium status found for device ID: $deviceId")
+                }
+            } catch (e: Exception) {
+                onResult?.invoke(false, "Restore error: ${e.message}")
+            }
+        }
+    }
+
     // Wishlist
     fun toggleWishlist(item: MediaItem) {
         viewModelScope.launch {
@@ -787,10 +802,12 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
             // Check if already downloaded
             val isAlreadyDownloaded = downloads.value.any { it.title == displayTitle }
             if (isAlreadyDownloaded) {
+                android.widget.Toast.makeText(applicationCtx, "$displayTitle is already in Saved Downloads!", android.widget.Toast.LENGTH_SHORT).show()
                 return@launch
             }
             // Check if already in active downloads list
             if (_activeDownloads.value.any { it.mediaId == downloadId }) {
+                android.widget.Toast.makeText(applicationCtx, "$displayTitle is currently downloading...", android.widget.Toast.LENGTH_SHORT).show()
                 return@launch
             }
 
@@ -813,7 +830,8 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
                 progress = 0f,
                 speed = "0.0 MB/s",
                 isPaused = false,
-                status = "Downloading"
+                status = "Downloading",
+                downloadUrl = if (item.reelsUrl.isNotBlank()) item.reelsUrl else if (item.description.startsWith("http")) item.description else ""
             )
 
             _activeDownloads.value = _activeDownloads.value + newDownload
@@ -1089,7 +1107,7 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
                             repository.addDownload(
                                 com.example.data.model.DownloadItem(
                                     title = target.title,
-                                    description = target.description,
+                                    description = "Comic Chapter",
                                     imageUrl = target.imageUrl,
                                     progress = 100
                                 )
@@ -1122,17 +1140,25 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
                                     } else {
                                         val localDir = java.io.File(context.filesDir, ".secured_media/comic_${chapter.id}")
                                         if (!localDir.exists()) localDir.mkdirs()
-                                        for (i in 0..2) {
+                                        val pages = chapter.pagesCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                                        val count = if (pages.isNotEmpty()) pages.size else 3
+                                        for (i in 0 until count) {
                                             val pageFile = java.io.File(localDir, "page_${String.format(java.util.Locale.US, "%03d", i)}.jpg")
-                                            pageFile.createNewFile()
-                                            pageFile.writeBytes(android.util.Base64.decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", android.util.Base64.DEFAULT))
+                                            if (!pageFile.exists() || pageFile.length() < 20L) {
+                                                try {
+                                                    pageFile.createNewFile()
+                                                    pageFile.writeText("COMIC_PAGE_LOCAL_CACHE_${chapter.id}_$i")
+                                                } catch (e: Exception) {
+                                                    e.printStackTrace()
+                                                }
+                                            }
                                         }
                                     }
                                     
                                     repository.addDownload(
                                         com.example.data.model.DownloadItem(
                                             title = target.title,
-                                            description = target.description,
+                                            description = "Comic Chapter",
                                             imageUrl = target.imageUrl,
                                             progress = 100
                                         )
@@ -1157,17 +1183,21 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
                     return@launch
                 }
 
-                // Determine source video URL path (ensure it is ALWAYS a real high-compatibility MP4 stream for genuine offline downloading)
-                val sourceUrl = if (target.title.contains("Romance", ignoreCase = true)) {
-                    "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4"
-                } else if (target.imageUrl.contains(".mp4")) {
-                    target.imageUrl
-                } else if (target.description.startsWith("http") && target.description.contains(".mp4")) {
-                    target.description
-                } else {
-                    // Default to high-compatibility MP4 for offline playing
-                    "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-                }
+                // Determine source video URL path (prioritize Cloudflare URL / downloadUrl from database)
+                val targetUrl = target.downloadUrl.takeIf { it.isNotBlank() && it.startsWith("http") }
+                val mediaObj = allMedia.value.find { it.id == mediaId || target.title.startsWith(it.title) || it.title.startsWith(target.title.substringBefore(" (")) }
+                val mediaReelsUrl = mediaObj?.reelsUrl?.takeIf { it.isNotBlank() && it.startsWith("http") }
+                val mediaDesc = mediaObj?.description?.takeIf { it.isNotBlank() && it.startsWith("http") }
+                val targetDesc = target.description.takeIf { it.isNotBlank() && it.startsWith("http") }
+                val targetImg = target.imageUrl.takeIf { it.isNotBlank() && it.startsWith("http") && (it.contains(".mp4") || it.contains("cloudflare") || it.contains("r2.dev")) }
+
+                val rawSource = targetUrl
+                    ?: mediaReelsUrl
+                    ?: mediaDesc
+                    ?: targetDesc
+                    ?: targetImg
+                    ?: ""
+                val sourceUrl = com.example.util.VideoUrlSanitizer.sanitize(rawSource)
 
                 // Check and create secure internal sandbox directory (.secured_media makes it hidden)
                 val secureDir = java.io.File(context.filesDir, ".secured_media")
@@ -1181,8 +1211,11 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
                 // Start downloading
                 val urlObj = java.net.URL(sourceUrl)
                 val connection = urlObj.openConnection() as java.net.HttpURLConnection
-                connection.connectTimeout = 8000
-                connection.readTimeout = 8000
+                connection.instanceFollowRedirects = true
+                connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36")
+                connection.setRequestProperty("Accept", "*/*")
+                connection.connectTimeout = 15000
+                connection.readTimeout = 15000
 
                 val responseCode = connection.responseCode
                 if (responseCode in 200..299) {
@@ -1222,8 +1255,12 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
                                 downloadedBytes += read
 
                                 val now = System.currentTimeMillis()
-                                if (now - lastUpdatedTime >= 400 || downloadedBytes == contentLength) {
-                                    val progress = if (contentLength > 0) (downloadedBytes.toFloat() / contentLength) * 100f else 50f
+                                if (now - lastUpdatedTime >= 250 || downloadedBytes == contentLength) {
+                                    val progress = if (contentLength > 0) {
+                                        (downloadedBytes.toFloat() / contentLength) * 100f
+                                    } else {
+                                        (downloadedBytes.toFloat() / (totalSizeMB * 1024f * 1024f)) * 100f
+                                    }
                                     val downloadedMB = downloadedBytes.toFloat() / (1024f * 1024f)
                                     
                                     val elapsedSec = (now - lastUpdatedTime).toFloat() / 1000f
@@ -1234,7 +1271,7 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
                                     _activeDownloads.value = _activeDownloads.value.map {
                                         if (it.mediaId == mediaId) {
                                             it.copy(
-                                                progress = progress.coerceAtMost(99.9f),
+                                                progress = progress.coerceIn(0.1f, 99.9f),
                                                 downloadedSizeMB = downloadedMB,
                                                 speed = speedFmt,
                                                 status = "Downloading"
@@ -1457,31 +1494,42 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
 
     fun updateProfilePremiumFromReferrer(referrer: String?) {
         _referrerUrl.value = referrer
-        if (referrer.isNullOrBlank()) {
-            _referrerStatus.value = "No playstore parameters found (Normal mode)"
-            viewModelScope.launch {
-                val prof = profile.value ?: ProfileState()
-                if (!prof.isPremium) {
-                    val updated = prof.copy(isPremium = false)
-                    repository.saveProfile(updated)
-                }
-            }
-            return
-        }
+        val hasPremiumParams = !referrer.isNullOrBlank() && referrer.contains("premium", ignoreCase = true)
 
-        // Checks if the referrer parameters contain the keyword "premium"
-        val hasPremiumParams = referrer.contains("premium", ignoreCase = true)
-        
-        _referrerStatus.value = if (hasPremiumParams) {
-            "Premium parameters detected!"
-        } else {
-            "Other parameters detected (Normal mode)"
+        _referrerStatus.value = when {
+            referrer.isNullOrBlank() -> "No playstore parameters found (Normal mode)"
+            hasPremiumParams -> "Premium parameters detected!"
+            else -> "Other parameters detected (Normal mode)"
         }
 
         viewModelScope.launch {
-            val prof = profile.value ?: ProfileState()
-            val updated = prof.copy(isPremium = hasPremiumParams)
-            repository.saveProfile(updated)
+            val userId = repository.getOrCreateUserUniqueId()
+            val prof = repository.profileState.first() ?: profile.value ?: ProfileState(isPremium = false)
+
+            if (hasPremiumParams) {
+                // Installed from a premium link -> save locally AND persist to Cloudflare immediately
+                repository.markPremiumFromReferrer()
+                if (!prof.isPremium) {
+                    repository.saveProfile(prof.copy(isPremium = true))
+                }
+                repository.registerOrUpdateUserData(userId, true)
+            } else {
+                // Never downgrade an already-confirmed or remotely-stored premium user on normal open / redownload
+                if (prof.isPremium || repository.isUserConfirmedPremiumLocally()) {
+                    if (!prof.isPremium) {
+                        repository.saveProfile(prof.copy(isPremium = true))
+                    }
+                    return@launch
+                }
+
+                // If remote status wasn't checked yet this session, check Cloudflare by ANDROID_ID first
+                if (!repository.hasCheckedRemoteUserStatusThisSession) {
+                    val restored = repository.restorePremiumStatusByDeviceId()
+                    if (restored) {
+                        return@launch
+                    }
+                }
+            }
         }
     }
 
@@ -1671,28 +1719,67 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
 
     fun seedStoriesComicsAndCategories() {
         viewModelScope.launch {
-            _firebaseSyncStatus.value = "Seeding local DB & syncing to Cloud Firestore..."
+            _firebaseSyncStatus.value = "Syncing with Cloudflare..."
             _isLoadingStories.value = true
             try {
-                val success = repository.seedSampleStoriesComicsAndCategories()
+                val success = repository.syncDataWithCloudflare(forceRefresh = true)
                 if (success) {
-                    _firebaseSyncStatus.value = "Stories, Comics, Chapters & Categories successfully seeded and uploaded to Cloud Firestore!"
-                    addDebugLog("Seeder: Stories & Comics sample database deployed online.")
-                    // Reload the current page to reflect changes
+                    _firebaseSyncStatus.value = "Data successfully synced with Cloudflare D1!"
+                    addDebugLog("Cloudflare: Data successfully synced.")
                     loadStoriesForPage(_currentStoryPage.value)
                 } else {
-                    val error = repository.firebaseService?.lastError
-                    _firebaseSyncStatus.value = if (!error.isNullOrBlank()) {
-                        "Seeded locally, but Cloud Firestore sync failed! Error: $error"
-                    } else {
-                        "Seeded locally, but Cloud Firestore sync failed! Keep Firestore security rules open."
-                    }
+                    _firebaseSyncStatus.value = "Cloudflare sync failed. Check Worker network connection."
                     loadStoriesForPage(_currentStoryPage.value)
                 }
             } catch (e: Exception) {
-                _firebaseSyncStatus.value = "Error during seeding: ${e.message}"
+                _firebaseSyncStatus.value = "Error during sync: ${e.message}"
             } finally {
                 _isLoadingStories.value = false
+            }
+        }
+    }
+
+    fun syncFirestoreCategoriesToCloudflare() {
+        viewModelScope.launch {
+            _firebaseSyncStatus.value = "Uploading raw Firestore categories to Cloudflare D1 (preserving keys)..."
+            _isLoadingStories.value = true
+            try {
+                val success = repository.uploadFirestoreVideoCategoriesToCloudflareWithoutEditingKeys()
+                if (success) {
+                    _firebaseSyncStatus.value = "Successfully uploaded raw Firestore categories to Cloudflare D1 with exact keys intact!"
+                    addDebugLog("Cloudflare: Uploaded raw Firestore categories with intact keys.")
+                } else {
+                    _firebaseSyncStatus.value = "Failed to upload raw Firestore categories to Cloudflare D1."
+                }
+            } catch (e: Exception) {
+                _firebaseSyncStatus.value = "Error during raw sync: ${e.message}"
+            } finally {
+                _isLoadingStories.value = false
+            }
+        }
+    }
+
+    private var isStoriesAndComicsSynced = false
+    private val _isSyncingStoriesAndComics = MutableStateFlow(false)
+    val isSyncingStoriesAndComics: StateFlow<Boolean> = _isSyncingStoriesAndComics.asStateFlow()
+
+    fun ensureStoriesAndComicsSynced(onComplete: () -> Unit = {}) {
+        if (isStoriesAndComicsSynced) {
+            onComplete()
+            return
+        }
+        viewModelScope.launch {
+            _isSyncingStoriesAndComics.value = true
+            _isLoadingStories.value = true
+            try {
+                repository.syncStoriesAndComicsWithFirebase()
+                isStoriesAndComicsSynced = true
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                _isSyncingStoriesAndComics.value = false
+                _isLoadingStories.value = false
+                onComplete()
             }
         }
     }
@@ -1724,6 +1811,27 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
         }
     }
 
+    fun importUserComicsJsonAndUpload(jsonString: String) {
+        viewModelScope.launch {
+            _firebaseSyncStatus.value = "Importing & uploading custom JSON comics to Firestore..."
+            _isLoadingStories.value = true
+            try {
+                val success = repository.importUserComicsJsonAndUpload(jsonString)
+                if (success) {
+                    _firebaseSyncStatus.value = "Custom JSON comics successfully imported & uploaded to Firestore!"
+                    addDebugLog("Import: Custom JSON comics uploaded to Firestore.")
+                    loadStoriesForPage(1)
+                } else {
+                    _firebaseSyncStatus.value = "Failed to import or upload custom JSON comics to Firestore."
+                }
+            } catch (e: Exception) {
+                _firebaseSyncStatus.value = "Error importing comics: ${e.message}"
+            } finally {
+                _isLoadingStories.value = false
+            }
+        }
+    }
+
     // --- Story Parts, Similar Comics, and Recommendation flows ---
     fun getStoryParts(storyId: Int): kotlinx.coroutines.flow.Flow<List<StoryPart>> {
         return repository.getPartsForStory(storyId)
@@ -1748,14 +1856,17 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
     fun loadSimilarComics(currentComic: Comic) {
         viewModelScope.launch {
             try {
-                val allOther = repository.getAllOtherComicsDirect(currentComic.id)
-                val currentWords = currentComic.title.lowercase().split(" ", "-", "_").filter { it.length > 2 }
+                var allOther = repository.getAllOtherComicsDirect(currentComic.id)
+                if (allOther.isEmpty()) {
+                    allOther = allComics.value.filter { it.id != currentComic.id }
+                }
+                val currentWords = currentComic.title.lowercase().split(" ", "-", "_", ":").filter { it.length > 2 }
                 val filtered = allOther.filter { other ->
-                    val otherWords = other.title.lowercase().split(" ", "-", "_")
+                    val otherWords = other.title.lowercase().split(" ", "-", "_", ":")
                     val sharesWord = currentWords.any { word -> otherWords.contains(word) }
-                    other.category == currentComic.category || sharesWord
+                    other.category.equals(currentComic.category, ignoreCase = true) || sharesWord
                 }.take(6)
-                _similarComics.value = filtered.ifEmpty { allOther.take(4) }
+                _similarComics.value = if (filtered.isNotEmpty()) filtered else allOther.take(6)
             } catch (e: Exception) {
                 addDebugLog("Failed to load similar comics: ${e.message}")
             }
@@ -1855,6 +1966,57 @@ class MPlayViewModel(private val repository: AppRepository) : ViewModel() {
             repository.clearStoryHistory()
         }
     }
+
+    // --- Batch Videos Support ---
+    val allBatchVideos: StateFlow<List<BatchVideo>> = repository.allBatchVideos
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allBatchVideoItems: StateFlow<List<BatchVideoItem>> = repository.allBatchVideoItems
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _isSyncingBatchVideos = MutableStateFlow(false)
+    val isSyncingBatchVideos: StateFlow<Boolean> = _isSyncingBatchVideos.asStateFlow()
+
+    private val _batchSearchQuery = MutableStateFlow("")
+    val batchSearchQuery: StateFlow<String> = _batchSearchQuery.asStateFlow()
+
+    private val _selectedBatchCategory = MutableStateFlow("All")
+    val selectedBatchCategory: StateFlow<String> = _selectedBatchCategory.asStateFlow()
+
+    var selectedBatchDetail by androidx.compose.runtime.mutableStateOf<BatchVideo?>(null)
+
+    fun setBatchSearch(query: String) {
+        _batchSearchQuery.value = query
+    }
+
+    fun setBatchCategory(cat: String) {
+        _selectedBatchCategory.value = cat
+    }
+
+    fun selectBatch(batch: BatchVideo?) {
+        selectedBatchDetail = batch
+    }
+
+    fun getItemsForBatch(batchId: String): Flow<List<BatchVideoItem>> {
+        return repository.getItemsForBatch(batchId)
+    }
+
+    fun syncBatchVideos(onComplete: ((Boolean) -> Unit)? = null) {
+        viewModelScope.launch {
+            _isSyncingBatchVideos.value = true
+            val success = repository.syncBatchVideos()
+            _isSyncingBatchVideos.value = false
+            onComplete?.invoke(success)
+        }
+    }
+
+    fun seedSampleBatchVideos() {
+        viewModelScope.launch {
+            _isSyncingBatchVideos.value = true
+            repository.seedSampleBatchVideos()
+            _isSyncingBatchVideos.value = false
+        }
+    }
 }
 
 data class ActiveDownload(
@@ -1867,5 +2029,6 @@ data class ActiveDownload(
     val progress: Float, // 0f to 100f
     val speed: String = "0.0 MB/s",
     val isPaused: Boolean = false,
-    val status: String = "Downloading" // "Downloading", "Paused", "Queued"
+    val status: String = "Downloading", // "Downloading", "Paused", "Queued"
+    val downloadUrl: String = ""
 )

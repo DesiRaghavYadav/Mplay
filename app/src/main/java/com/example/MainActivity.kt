@@ -64,6 +64,9 @@ class MainActivity : ComponentActivity() {
 
         viewModel = ViewModelProvider(this, viewModelFactory)[MPlayViewModel::class.java]
 
+        // Initialize AdManager and MobileAds SDK
+        com.example.data.ads.AdManager.initialize(this)
+
         // Handle possible Firebase Cloud Messaging (FCM) push notification cold launch
         handleNotificationIntent(intent)
 
@@ -82,6 +85,11 @@ class MainActivity : ComponentActivity() {
                 MainAppScreen(viewModel = viewModel)
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        com.example.data.ads.AdManager.tryShowAppOpenAd(this)
     }
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
@@ -197,6 +205,8 @@ class MainActivity : ComponentActivity() {
                             
                             if (tab.equals("explore", ignoreCase = true)) {
                                 viewModel.selectTab(com.example.ui.viewmodel.AppTab.EXPLORE)
+                            } else if (tab.equals("batch", ignoreCase = true) || tab.equals("batchvideo", ignoreCase = true) || tab.equals("batches", ignoreCase = true)) {
+                                viewModel.selectTab(com.example.ui.viewmodel.AppTab.BATCH_VIDEO)
                             } else if (tab.equals("reels", ignoreCase = true)) {
                                 viewModel.selectTab(com.example.ui.viewmodel.AppTab.REELS)
                             } else if (tab.equals("profile", ignoreCase = true)) {

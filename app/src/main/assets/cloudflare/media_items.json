@@ -1,0 +1,24 @@
+[
+  {
+    "id": 101,
+    "title": "Cyberpunk 2099",
+    "description": "A high-octane sci-fi adventure through futuristic metropolis.",
+    "imageUrl": "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&q=80",
+    "category": "Action & Sci-Fi",
+    "isPremium": false,
+    "rating": 4.8,
+    "reelsUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
+    "likesCount": "125k"
+  },
+  {
+    "id": 102,
+    "title": "Shadows of the Forgotten Realm",
+    "description": "Unraveling ancient mysteries deep within enchanted forests.",
+    "imageUrl": "https://images.unsplash.com/photo-1518173946687-a4c8a383392e?auto=format&fit=crop&w=600&q=80",
+    "category": "Fantasy & Magic",
+    "isPremium": true,
+    "rating": 4.7,
+    "reelsUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
+    "likesCount": "98k"
+  }
+]

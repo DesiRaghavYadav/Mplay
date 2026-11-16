@@ -55,6 +55,9 @@ interface AppDao {
     @Query("DELETE FROM media_items WHERE id = :id")
     suspend fun deleteMediaItemById(id: Int)
 
+    @Query("DELETE FROM media_items WHERE category LIKE '%' || :category || '%' OR category = :category")
+    suspend fun deleteMediaItemsByCategory(category: String)
+
     @Query("SELECT * FROM media_items WHERE id = :id LIMIT 1")
     suspend fun getMediaItemById(id: Int): MediaItem?
 
@@ -278,4 +281,39 @@ interface AppDao {
 
     @Query("DELETE FROM story_history")
     suspend fun clearStoryHistory()
+
+    // Batch Videos
+    @Query("SELECT * FROM batch_videos ORDER BY id DESC")
+    fun getAllBatchVideos(): Flow<List<BatchVideo>>
+
+    @Query("SELECT COUNT(*) FROM batch_videos")
+    suspend fun getBatchVideosCount(): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertBatchVideos(batches: List<BatchVideo>)
+
+    @Query("DELETE FROM batch_videos WHERE batchId = :batchId")
+    suspend fun deleteBatchVideoById(batchId: String)
+
+    @Query("DELETE FROM batch_videos")
+    suspend fun deleteAllBatchVideos()
+
+    // Batch Video Items
+    @Query("SELECT * FROM batch_video_items WHERE batchId = :batchId ORDER BY videoIndex ASC, id ASC")
+    fun getItemsForBatch(batchId: String): Flow<List<BatchVideoItem>>
+
+    @Query("SELECT * FROM batch_video_items WHERE batchId = :batchId ORDER BY videoIndex ASC, id ASC")
+    suspend fun getItemsForBatchDirect(batchId: String): List<BatchVideoItem>
+
+    @Query("SELECT * FROM batch_video_items ORDER BY id ASC")
+    fun getAllBatchVideoItems(): Flow<List<BatchVideoItem>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertBatchVideoItems(items: List<BatchVideoItem>)
+
+    @Query("DELETE FROM batch_video_items WHERE batchId = :batchId")
+    suspend fun deleteItemsForBatch(batchId: String)
+
+    @Query("DELETE FROM batch_video_items")
+    suspend fun deleteAllBatchVideoItems()
 }

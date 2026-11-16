@@ -1,0 +1,13 @@
+[
+  {
+    "id": 1,
+    "title": "Crazy 3D Animation Highlights",
+    "description": "Mindblowing visual showcase.",
+    "imageUrl": "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?auto=format&fit=crop&w=600&q=80",
+    "videoUrl": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+    "likesCount": "45k",
+    "isLiked": false,
+    "createdAt": 1700000000000,
+    "userStatus": "normal"
+  }
+]

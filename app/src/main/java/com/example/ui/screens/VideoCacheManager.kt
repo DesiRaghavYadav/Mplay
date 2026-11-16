@@ -78,8 +78,20 @@ object VideoCacheManager {
     @Synchronized
     fun createDataSourceFactory(context: Context): CacheDataSource.Factory {
         val cache = getCache(context)
+        val defaultUa = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
             .setAllowCrossProtocolRedirects(true)
+            .setKeepPostFor302Redirects(true)
+            .setConnectTimeoutMs(15000)
+            .setReadTimeoutMs(20000)
+            .setUserAgent(defaultUa)
+            .setDefaultRequestProperties(
+                mapOf(
+                    "User-Agent" to defaultUa,
+                    "Accept" to "*/*",
+                    "Accept-Encoding" to "identity;q=1, *;q=0"
+                )
+            )
         
         val defaultDataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
 
@@ -95,14 +107,15 @@ object VideoCacheManager {
      * Silently pre-buffers/pre-caches the next video in the background to enable zero-latency scrolling
      */
     fun preloadVideo(context: Context, videoUrl: String) {
-        if (videoUrl.isBlank()) return
+        val sanitizedUrl = com.example.util.VideoUrlSanitizer.sanitize(videoUrl)
+        if (sanitizedUrl.isBlank()) return
         preloadScope.launch {
             try {
                 val cache = getCache(context)
                 val cacheDataSourceFactory = createDataSourceFactory(context)
                 val dataSource = cacheDataSourceFactory.createDataSource()
                 // Preload the first 1 MB of the video for immediate playback start
-                val dataSpec = androidx.media3.datasource.DataSpec(Uri.parse(videoUrl), 0, 1024 * 1024L)
+                val dataSpec = androidx.media3.datasource.DataSpec(Uri.parse(sanitizedUrl), 0, 1024 * 1024L)
                 val cacheWriter = CacheWriter(
                     dataSource,
                     dataSpec,

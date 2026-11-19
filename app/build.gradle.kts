@@ -14,8 +14,8 @@ android {
     applicationId = "com.mastreels"
     minSdk = 24
     targetSdk = 36
-    versionCode = 12
-    versionName = "12.0"
+    versionCode = 50
+    versionName = "50.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     resourceConfigurations.addAll(listOf("en", "es"))

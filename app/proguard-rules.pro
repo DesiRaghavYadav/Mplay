@@ -73,4 +73,21 @@
 -keep class com.google.firebase.iid.** { *; }
 -dontwarn com.google.firebase.iid.**
 
+# --- App Network DTOs & Retrofit APIs (R8 Full Mode Safety) ---
+-keep class com.example.data.network.** { *; }
+-keep interface com.example.data.network.** { *; }
+
+# --- Play Install Referrer (Premium Deep/Referrer Links) ---
+-keep class com.android.installreferrer.** { *; }
+-dontwarn com.android.installreferrer.**
+
+# --- OkHttp / Okio ---
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-dontwarn javax.annotation.**
+
+# --- Media3 / ExoPlayer ---
+-keep class androidx.media3.** { *; }
+-dontwarn androidx.media3.**
+
 
